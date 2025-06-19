@@ -1,0 +1,150 @@
+{
+  "mappings": {
+    "org/wsm/autolan/mixin/BanCommandMixin": {
+      "ban": "Lnet/minecraft/class_3016;method_13022(Lnet/minecraft/class_2168;Ljava/util/Collection;Lnet/minecraft/class_2561;)I"
+    },
+    "org/wsm/autolan/mixin/BanIpCommandMixin": {
+      "Lnet/minecraft/server/PlayerManager;getPlayersByIp(Ljava/lang/String;)Ljava/util/List;": "Lnet/minecraft/class_3324;method_14559(Ljava/lang/String;)Ljava/util/List;",
+      "banIp": "Lnet/minecraft/class_3012;method_13007(Lnet/minecraft/class_2168;Ljava/lang/String;Lnet/minecraft/class_2561;)I"
+    },
+    "org/wsm/autolan/mixin/ButtonWidgetAccessor": {
+      "onPress": "field_22767:Lnet/minecraft/class_4185$class_4241;"
+    },
+    "org/wsm/autolan/mixin/ClientPlayNetworkHandlerMixin": {
+      "getPlayerList": "Lnet/minecraft/class_634;method_2880()Ljava/util/Collection;",
+      "onChatMessage": "Lnet/minecraft/class_634;method_43595(Lnet/minecraft/class_7438;)V",
+      "onGameMessage": "Lnet/minecraft/class_634;method_43596(Lnet/minecraft/class_7439;)V",
+      "onPlayerList": "Lnet/minecraft/class_634;method_11113(Lnet/minecraft/class_2703;)V"
+    },
+    "org/wsm/autolan/mixin/GameMenuScreenMixin": {
+      "initWidgets": "Lnet/minecraft/class_433;method_20543()V"
+    },
+    "org/wsm/autolan/mixin/GridWidgetAccessor": {
+      "children": "field_40771:Ljava/util/List;"
+    },
+    "org/wsm/autolan/mixin/IntegratedServerAccessor": {
+      "lanPinger": "field_5519:Lnet/minecraft/class_1133;",
+      "lanPort": "field_5522:I",
+      "localPlayerUuid": "field_5521:Ljava/util/UUID;"
+    },
+    "org/wsm/autolan/mixin/MinecraftServerMixin": {
+      "getPermissionLevel": "Lnet/minecraft/server/MinecraftServer;method_3835(Lcom/mojang/authlib/GameProfile;)I",
+      "shutdown": "Lnet/minecraft/server/MinecraftServer;method_3782()V"
+    },
+    "org/wsm/autolan/mixin/OpenToLanScreenMixin": {
+      "Lnet/minecraft/client/gui/DrawContext;drawCenteredTextWithShadow(Lnet/minecraft/client/font/TextRenderer;Lnet/minecraft/text/Text;III)V": "Lnet/minecraft/class_332;method_27534(Lnet/minecraft/class_327;Lnet/minecraft/class_2561;III)V",
+      "Lnet/minecraft/util/NetworkUtils;isPortAvailable(I)Z": "Lnet/minecraft/class_3521;method_46872(I)Z",
+      "init": "Lnet/minecraft/class_436;method_25426()V",
+      "render": "Lnet/minecraft/class_436;method_25394(Lnet/minecraft/class_332;IIF)V",
+      "updatePort": "Lnet/minecraft/class_436;method_47417(Ljava/lang/String;)Lnet/minecraft/class_2561;"
+    },
+    "org/wsm/autolan/mixin/PlayerListEntryAccessor": {
+      "displayName": "field_3743:Lnet/minecraft/class_2561;"
+    },
+    "org/wsm/autolan/mixin/PlayerListS2CPacketAccessor": {
+      "entries": "field_12369:Ljava/util/List;"
+    },
+    "org/wsm/autolan/mixin/PlayerManagerAccessor": {
+      "maxPlayers": "field_14347:I"
+    },
+    "org/wsm/autolan/mixin/PlayerManagerMixin": {
+      "Lnet/minecraft/server/OperatorList;add(Lnet/minecraft/server/ServerConfigEntry;)V": "Lnet/minecraft/class_3326;method_14633(Lnet/minecraft/class_3330;)V",
+      "Lnet/minecraft/server/OperatorList;remove(Ljava/lang/Object;)V": "Lnet/minecraft/class_3326;method_14635(Ljava/lang/Object;)V",
+      "addToOperators": "Lnet/minecraft/class_3324;method_14582(Lcom/mojang/authlib/GameProfile;)V",
+      "broadcast": "Lnet/minecraft/class_3324;method_43514(Lnet/minecraft/class_2561;Z)V",
+      "canBypassPlayerLimit": "Lnet/minecraft/class_3324;method_14609(Lcom/mojang/authlib/GameProfile;)Z",
+      "checkCanJoin": "Lnet/minecraft/class_3324;method_14586(Ljava/net/SocketAddress;Lcom/mojang/authlib/GameProfile;)Lnet/minecraft/class_2561;",
+      "getOpNames": "Lnet/minecraft/class_3324;method_14584()[Ljava/lang/String;",
+      "isOperator": "Lnet/minecraft/class_3324;method_14569(Lcom/mojang/authlib/GameProfile;)Z",
+      "isWhitelistEnabled": "Lnet/minecraft/class_3324;method_14614()Z",
+      "isWhitelisted": "Lnet/minecraft/class_3324;method_14587(Lcom/mojang/authlib/GameProfile;)Z",
+      "onPlayerConnect": "Lnet/minecraft/class_3324;method_14570(Lnet/minecraft/class_2535;Lnet/minecraft/class_3222;Lnet/minecraft/class_8792;)V",
+      "removeFromOperators": "Lnet/minecraft/class_3324;method_14604(Lcom/mojang/authlib/GameProfile;)V",
+      "setWhitelistEnabled": "Lnet/minecraft/class_3324;method_14557(Z)V"
+    },
+    "org/wsm/autolan/mixin/PublishCommandMixin": {
+      "register": "Lnet/minecraft/class_3093;method_13510(Lcom/mojang/brigadier/CommandDispatcher;)V"
+    },
+    "org/wsm/autolan/mixin/ServerConfigListAccessor": {
+      "contains": "method_14644(Ljava/lang/Object;)Z"
+    },
+    "org/wsm/autolan/mixin/WhitelistCommandMixin": {
+      "executeAdd": "Lnet/minecraft/class_3156;method_13838(Lnet/minecraft/class_2168;Ljava/util/Collection;)I"
+    }
+  },
+  "data": {
+    "named:intermediary": {
+      "org/wsm/autolan/mixin/BanCommandMixin": {
+        "ban": "Lnet/minecraft/class_3016;method_13022(Lnet/minecraft/class_2168;Ljava/util/Collection;Lnet/minecraft/class_2561;)I"
+      },
+      "org/wsm/autolan/mixin/BanIpCommandMixin": {
+        "Lnet/minecraft/server/PlayerManager;getPlayersByIp(Ljava/lang/String;)Ljava/util/List;": "Lnet/minecraft/class_3324;method_14559(Ljava/lang/String;)Ljava/util/List;",
+        "banIp": "Lnet/minecraft/class_3012;method_13007(Lnet/minecraft/class_2168;Ljava/lang/String;Lnet/minecraft/class_2561;)I"
+      },
+      "org/wsm/autolan/mixin/ButtonWidgetAccessor": {
+        "onPress": "field_22767:Lnet/minecraft/class_4185$class_4241;"
+      },
+      "org/wsm/autolan/mixin/ClientPlayNetworkHandlerMixin": {
+        "getPlayerList": "Lnet/minecraft/class_634;method_2880()Ljava/util/Collection;",
+        "onChatMessage": "Lnet/minecraft/class_634;method_43595(Lnet/minecraft/class_7438;)V",
+        "onGameMessage": "Lnet/minecraft/class_634;method_43596(Lnet/minecraft/class_7439;)V",
+        "onPlayerList": "Lnet/minecraft/class_634;method_11113(Lnet/minecraft/class_2703;)V"
+      },
+      "org/wsm/autolan/mixin/GameMenuScreenMixin": {
+        "initWidgets": "Lnet/minecraft/class_433;method_20543()V"
+      },
+      "org/wsm/autolan/mixin/GridWidgetAccessor": {
+        "children": "field_40771:Ljava/util/List;"
+      },
+      "org/wsm/autolan/mixin/IntegratedServerAccessor": {
+        "lanPinger": "field_5519:Lnet/minecraft/class_1133;",
+        "lanPort": "field_5522:I",
+        "localPlayerUuid": "field_5521:Ljava/util/UUID;"
+      },
+      "org/wsm/autolan/mixin/MinecraftServerMixin": {
+        "getPermissionLevel": "Lnet/minecraft/server/MinecraftServer;method_3835(Lcom/mojang/authlib/GameProfile;)I",
+        "shutdown": "Lnet/minecraft/server/MinecraftServer;method_3782()V"
+      },
+      "org/wsm/autolan/mixin/OpenToLanScreenMixin": {
+        "Lnet/minecraft/client/gui/DrawContext;drawCenteredTextWithShadow(Lnet/minecraft/client/font/TextRenderer;Lnet/minecraft/text/Text;III)V": "Lnet/minecraft/class_332;method_27534(Lnet/minecraft/class_327;Lnet/minecraft/class_2561;III)V",
+        "Lnet/minecraft/util/NetworkUtils;isPortAvailable(I)Z": "Lnet/minecraft/class_3521;method_46872(I)Z",
+        "init": "Lnet/minecraft/class_436;method_25426()V",
+        "render": "Lnet/minecraft/class_436;method_25394(Lnet/minecraft/class_332;IIF)V",
+        "updatePort": "Lnet/minecraft/class_436;method_47417(Ljava/lang/String;)Lnet/minecraft/class_2561;"
+      },
+      "org/wsm/autolan/mixin/PlayerListEntryAccessor": {
+        "displayName": "field_3743:Lnet/minecraft/class_2561;"
+      },
+      "org/wsm/autolan/mixin/PlayerListS2CPacketAccessor": {
+        "entries": "field_12369:Ljava/util/List;"
+      },
+      "org/wsm/autolan/mixin/PlayerManagerAccessor": {
+        "maxPlayers": "field_14347:I"
+      },
+      "org/wsm/autolan/mixin/PlayerManagerMixin": {
+        "Lnet/minecraft/server/OperatorList;add(Lnet/minecraft/server/ServerConfigEntry;)V": "Lnet/minecraft/class_3326;method_14633(Lnet/minecraft/class_3330;)V",
+        "Lnet/minecraft/server/OperatorList;remove(Ljava/lang/Object;)V": "Lnet/minecraft/class_3326;method_14635(Ljava/lang/Object;)V",
+        "addToOperators": "Lnet/minecraft/class_3324;method_14582(Lcom/mojang/authlib/GameProfile;)V",
+        "broadcast": "Lnet/minecraft/class_3324;method_43514(Lnet/minecraft/class_2561;Z)V",
+        "canBypassPlayerLimit": "Lnet/minecraft/class_3324;method_14609(Lcom/mojang/authlib/GameProfile;)Z",
+        "checkCanJoin": "Lnet/minecraft/class_3324;method_14586(Ljava/net/SocketAddress;Lcom/mojang/authlib/GameProfile;)Lnet/minecraft/class_2561;",
+        "getOpNames": "Lnet/minecraft/class_3324;method_14584()[Ljava/lang/String;",
+        "isOperator": "Lnet/minecraft/class_3324;method_14569(Lcom/mojang/authlib/GameProfile;)Z",
+        "isWhitelistEnabled": "Lnet/minecraft/class_3324;method_14614()Z",
+        "isWhitelisted": "Lnet/minecraft/class_3324;method_14587(Lcom/mojang/authlib/GameProfile;)Z",
+        "onPlayerConnect": "Lnet/minecraft/class_3324;method_14570(Lnet/minecraft/class_2535;Lnet/minecraft/class_3222;Lnet/minecraft/class_8792;)V",
+        "removeFromOperators": "Lnet/minecraft/class_3324;method_14604(Lcom/mojang/authlib/GameProfile;)V",
+        "setWhitelistEnabled": "Lnet/minecraft/class_3324;method_14557(Z)V"
+      },
+      "org/wsm/autolan/mixin/PublishCommandMixin": {
+        "register": "Lnet/minecraft/class_3093;method_13510(Lcom/mojang/brigadier/CommandDispatcher;)V"
+      },
+      "org/wsm/autolan/mixin/ServerConfigListAccessor": {
+        "contains": "method_14644(Ljava/lang/Object;)Z"
+      },
+      "org/wsm/autolan/mixin/WhitelistCommandMixin": {
+        "executeAdd": "Lnet/minecraft/class_3156;method_13838(Lnet/minecraft/class_2168;Ljava/util/Collection;)I"
+      }
+    }
+  }
+}
