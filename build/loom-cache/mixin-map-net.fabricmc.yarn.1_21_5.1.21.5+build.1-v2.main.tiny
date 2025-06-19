@@ -1,15 +1,15 @@
 v1	named	intermediary
-FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Z	whitelistEnabled	field_14352
-FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Lnet/minecraft/server/MinecraftServer;	server	field_14360
-FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Lnet/minecraft/server/OperatorList;	ops	field_14353
-FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Lorg/slf4j/Logger;	LOGGER	field_14349
 FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Lnet/minecraft/server/Whitelist;	whitelist	field_14361
+FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Lorg/slf4j/Logger;	LOGGER	field_14349
+FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Lnet/minecraft/server/MinecraftServer;	server	field_14360
+FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Z	whitelistEnabled	field_14352
+FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Lnet/minecraft/server/OperatorList;	ops	field_14353
 FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Lnet/minecraft/server/BannedIpList;	bannedIps	field_14345
 FIELD	org/wsm/autolan/mixin/PlayerManagerMixin	Lnet/minecraft/server/BannedPlayerList;	bannedProfiles	field_14344
 FIELD	org/wsm/autolan/mixin/OpenToLanScreenMixin	Lnet/minecraft/client/gui/widget/TextFieldWidget;	portField	field_41111
 FIELD	org/wsm/autolan/mixin/OpenToLanScreenMixin	Lnet/minecraft/world/GameMode;	gameMode	field_2545
 FIELD	org/wsm/autolan/mixin/OpenToLanScreenMixin	I	ERROR_TEXT_COLOR	field_41107
-FIELD	org/wsm/autolan/mixin/OpenToLanScreenMixin	I	port	field_41110
 FIELD	org/wsm/autolan/mixin/OpenToLanScreenMixin	Lnet/minecraft/text/Text;	PORT_TEXT	field_41108
+FIELD	org/wsm/autolan/mixin/OpenToLanScreenMixin	I	port	field_41110
 FIELD	org/wsm/autolan/mixin/LevelPropertiesMixin	Lnet/minecraft/world/level/LevelInfo;	levelInfo	field_25030
 FIELD	org/wsm/autolan/mixin/PublishCommandMixin	Lcom/mojang/brigadier/exceptions/SimpleCommandExceptionType;	FAILED_EXCEPTION	field_13680
