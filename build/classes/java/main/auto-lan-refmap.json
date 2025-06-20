@@ -45,9 +45,11 @@
       "entries": "field_12369:Ljava/util/List;"
     },
     "org/wsm/autolan/mixin/PlayerManagerAccessor": {
-      "maxPlayers": "field_14347:I"
+      "maxPlayers": "field_14347:I",
+      "ops": "field_14353:Lnet/minecraft/class_3326;"
     },
     "org/wsm/autolan/mixin/PlayerManagerMixin": {
+      "<init>": "Lnet/minecraft/class_3324;<init>(Lnet/minecraft/server/MinecraftServer;Lnet/minecraft/class_7780;Lnet/minecraft/class_29;I)V",
       "Lnet/minecraft/server/OperatorList;add(Lnet/minecraft/server/ServerConfigEntry;)V": "Lnet/minecraft/class_3326;method_14633(Lnet/minecraft/class_3330;)V",
       "Lnet/minecraft/server/OperatorList;remove(Ljava/lang/Object;)V": "Lnet/minecraft/class_3326;method_14635(Ljava/lang/Object;)V",
       "addToOperators": "Lnet/minecraft/class_3324;method_14582(Lcom/mojang/authlib/GameProfile;)V",
@@ -119,9 +121,11 @@
         "entries": "field_12369:Ljava/util/List;"
       },
       "org/wsm/autolan/mixin/PlayerManagerAccessor": {
-        "maxPlayers": "field_14347:I"
+        "maxPlayers": "field_14347:I",
+        "ops": "field_14353:Lnet/minecraft/class_3326;"
       },
       "org/wsm/autolan/mixin/PlayerManagerMixin": {
+        "<init>": "Lnet/minecraft/class_3324;<init>(Lnet/minecraft/server/MinecraftServer;Lnet/minecraft/class_7780;Lnet/minecraft/class_29;I)V",
         "Lnet/minecraft/server/OperatorList;add(Lnet/minecraft/server/ServerConfigEntry;)V": "Lnet/minecraft/class_3326;method_14633(Lnet/minecraft/class_3330;)V",
         "Lnet/minecraft/server/OperatorList;remove(Ljava/lang/Object;)V": "Lnet/minecraft/class_3326;method_14635(Ljava/lang/Object;)V",
         "addToOperators": "Lnet/minecraft/class_3324;method_14582(Lcom/mojang/authlib/GameProfile;)V",

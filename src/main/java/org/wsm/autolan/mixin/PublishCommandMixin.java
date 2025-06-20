@@ -28,9 +28,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import org.wsm.autolan.AutoLan;
-import org.wsm.autolan.AutoLanServerValues;
-import org.wsm.autolan.AutoLanState;
-import org.wsm.autolan.LanSettings;
 import org.wsm.autolan.PublishCommandArgumentValues;
 import org.wsm.autolan.TunnelType;
 import com.mojang.brigadier.Command;
@@ -57,7 +54,6 @@ public class PublishCommandMixin {
                         Text.translatable("commands.publish.failed.not_started"));
         private static final SimpleCommandExceptionType STOP_FAILED_EXCEPTION = new SimpleCommandExceptionType(
                         Text.translatable("commands.publish.failed.stop"));
-        private static final Text PUBLISH_STOPPED_TEXT = Text.translatable("commands.publish.stopped");
 
         @Inject(method = "register", at = @At("HEAD"), cancellable = true)
         private static void register(CommandDispatcher<ServerCommandSource> dispatcher, CallbackInfo ci) {
