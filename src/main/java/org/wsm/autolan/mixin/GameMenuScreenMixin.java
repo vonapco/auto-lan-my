@@ -7,7 +7,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.LocalCapture;
 
 import net.minecraft.client.gui.screen.GameMenuScreen;
-import org.wsm.autolan.gui.AutoLanOpenToLanScreen;
+import org.wsm.autolan.gui.CustomOpenToLanScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.GridWidget;
@@ -31,23 +31,40 @@ public class GameMenuScreenMixin extends Screen {
 
         boolean isHost = this.client.isIntegratedServerRunning();
         if (isHost) {
+            org.wsm.autolan.AutoLan.LOGGER.info("[GameMenuScreen] Инициализация кнопок меню паузы (isHost: {})", isHost);
+            
             for (Widget widget : ((GridWidgetAccessor) gridWidget).getChildren()) {
                 if (!(widget instanceof ButtonWidget)) {
                     continue;
                 }
                 ButtonWidget button = (ButtonWidget) widget;
 
-                // Случай, когда мир уже открыт: вместо Player Reporting показываем «Открыть для сети»
-                if (server.isRemote() && PLAYER_REPORTING_TEXT.equals(button.getMessage())) {
+                // Проверяем, был ли сервер открыт вручную
+                boolean isLanOpenedManually = org.wsm.autolan.AutoLan.isLanOpenedManually();
+                boolean isServerRemote = server != null && server.isRemote();
+                
+                org.wsm.autolan.AutoLan.LOGGER.info("[GameMenuScreen] Состояние сервера: isRemote={}, isLanOpenedManually={}", 
+                                                   isServerRemote, isLanOpenedManually);
+                
+                if (PLAYER_REPORTING_TEXT.equals(button.getMessage())) {
+                    // Если LAN не запущен или запущен автоматически (но не вручную),
+                    // показываем кнопку "Открыть для сети"
+                    if (!isServerRemote || (isServerRemote && !isLanOpenedManually)) {
                     button.setMessage(OPEN_LAN_TEXT);
                     ((ButtonWidgetAccessor) button)
-                            .setOnPress(btn -> this.client.setScreen(new AutoLanOpenToLanScreen(this)));
+                            .setOnPress(btn -> this.client.setScreen(new CustomOpenToLanScreen(this)));
+                        org.wsm.autolan.AutoLan.LOGGER.info("[GameMenuScreen] Заменили кнопку 'Player Reporting' на 'Открыть для сети', LAN открыт вручную: {}", isLanOpenedManually);
+                    } else {
+                        // Иначе оставляем кнопку "Жалобы" как в ванильном Minecraft
+                        org.wsm.autolan.AutoLan.LOGGER.info("[GameMenuScreen] Оставили кнопку 'Player Reporting', LAN открыт вручную: {}", isLanOpenedManually);
+                    }
                 }
 
-                // Случай, когда мир ещё НЕ открыт: у кнопки уже правильный текст, меняем действие
+                // Случай, когда кнопка "Открыть для сети" уже на месте: просто меняем действие
                 if (OPEN_LAN_TEXT.equals(button.getMessage())) {
                     ((ButtonWidgetAccessor) button)
-                            .setOnPress(btn -> this.client.setScreen(new AutoLanOpenToLanScreen(this)));
+                            .setOnPress(btn -> this.client.setScreen(new CustomOpenToLanScreen(this)));
+                    org.wsm.autolan.AutoLan.LOGGER.info("[GameMenuScreen] Настроили обработчик для кнопки 'Открыть для сети'");
                 }
             }
         }

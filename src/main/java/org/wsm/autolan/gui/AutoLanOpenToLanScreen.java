@@ -6,9 +6,12 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.CyclingButtonWidget;
 import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.text.Texts;
 import net.minecraft.text.TranslatableTextContent;
+import net.minecraft.util.Formatting;
+import net.minecraft.util.NetworkUtils;
 import org.wsm.autolan.AutoLanServerValues;
 import org.wsm.autolan.mixin.ButtonWidgetAccessor;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -17,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import org.wsm.autolan.AutoLan;
 import org.wsm.autolan.AutoLanState;
 import org.wsm.autolan.util.ServerUtil;
+import net.minecraft.world.GameMode;
 
 public class AutoLanOpenToLanScreen extends OpenToLanScreen {
     private static final Text START_TEXT = Text.translatable("lanServer.start");
@@ -95,43 +99,48 @@ public class AutoLanOpenToLanScreen extends OpenToLanScreen {
         // Закрываем экран
         mc.setScreen(null);
 
-        // 1. Выводим сообщение с адресом ngrok
-        AutoLanServerValues serverValues = (AutoLanServerValues) server;
-        Text tunnelText = serverValues.getTunnelText();
-        Text portText = Texts.bracketedCopyable(String.valueOf(server.getServerPort()));
-        String motd = server.getServerMotd();
-        Text newMsg;
-        if (tunnelText != null) {
-            newMsg = Text.translatable("commands.publish.saved.tunnel", portText, tunnelText, motd);
-        } else {
-            newMsg = Text.translatable("commands.publish.saved", portText, motd);
-        }
-        mc.inGameHud.getChatHud().addMessage(newMsg);
+        // Получаем текущий игровой режим с сервера
+        GameMode currentGameMode = server.getDefaultGameMode();
+        LOGGER.info("[AutoLan] [OPEN_LAN] Текущий игровой режим: {}", currentGameMode);
+
+        // Сохраняем пользовательские настройки для будущих автоматических открытий
+        // Используем существующий GameMode сервера, т.к. в этом экране его нельзя изменить
+        AutoLan.saveUserLanSettings(this.customCommandsAllowed, currentGameMode, server.isOnlineMode(), 
+                                  "§6Настроенный сервер", server.getMaxPlayerCount(), 
+                                  server.isRemote() ? server.getServerPort() : NetworkUtils.findLocalPort());
         
-        // 2. Устанавливаем флаги - customCommandsAllowed задаем из нашей кнопки
-        // А стандартный флаг areCommandsAllowed синхронизируем с ним
-        try {
-            if (server.getOverworld() != null && server.getOverworld().getPersistentStateManager() != null) {
-                // ВАЖНО: Сначала устанавливаем наш флаг
-                AutoLanState state = server.getOverworld().getPersistentStateManager().getOrCreate(AutoLanState.STATE_TYPE);
-                state.setCustomCommandsAllowed(this.customCommandsAllowed);
-                LOGGER.info("[AutoLan] Установлен customCommandsAllowed = {}", this.customCommandsAllowed);
-                
-                // Затем устанавливаем стандартный флаг
-                ServerUtil.setCommandsAllowed(server, this.customCommandsAllowed);
-                LOGGER.info("[AutoLan] Установлен стандартный флаг areCommandsAllowed = {}", this.customCommandsAllowed);
-                
-                // Сохраняем пользовательские настройки для автоматического открытия
-                AutoLan.saveUserLanSettings(this.customCommandsAllowed);
-                
-                // Принудительно обновляем права игроков
-                updatePlayersPermissions(server);
-            } else {
-                LOGGER.warn("[AutoLan] Не удалось получить доступ к PersistentStateManager для сохранения настроек");
+        // Сбрасываем флаг показа сообщения, чтобы при ручном открытии сообщение всегда показывалось
+        AutoLan.setLanMessageShownInChat(false);
+        
+        // Это ручной запуск, устанавливаем флаг ручного открытия напрямую
+        // вместо использования флага ожидания и обработчика сетевых сообщений
+        AutoLan.setLanOpenedManually(true);
+        LOGGER.info("[AutoLan] [LAN_MANUAL_FORCE] Устанавливаем флаг ручного открытия LAN напрямую");
+        
+        // Устанавливаем также флаг ожидания для обратной совместимости
+        AutoLan.markLanPendingManualActivation();
+        
+        // Используем общий метод для применения настроек, даже если сервер уже запущен
+        AutoLan.startOrSaveLan(
+            server,
+            server.getDefaultGameMode(), // сохраняем текущий режим игры
+            server.isOnlineMode(), // сохраняем текущий режим онлайн
+            ((AutoLanServerValues)server).getTunnelType(), // сохраняем текущий туннель
+            server.isRemote() ? server.getServerPort() : NetworkUtils.findLocalPort(), // используем подходящий порт
+            server.getMaxPlayerCount(), // сохраняем текущее максимальное количество игроков
+            "§6Настроенный сервер", // устанавливаем базовое MOTD
+            text -> mc.inGameHud.getChatHud().addMessage(text), // обработчик успеха
+            () -> {
+                // Если произошла фатальная ошибка
+                MutableText failedText = Text.translatable("commands.publish.failed").copy();
+                mc.inGameHud.getChatHud().addMessage(failedText.formatted(Formatting.RED));
+            },
+            text -> {
+                // Обработчик нефатальной ошибки
+                MutableText errorText = text.copy();
+                mc.inGameHud.getChatHud().addMessage(errorText.formatted(Formatting.RED));
             }
-        } catch (Exception e) {
-            LOGGER.error("[AutoLan] Ошибка при установке customCommandsAllowed", e);
-        }
+        );
     }
     
     /**

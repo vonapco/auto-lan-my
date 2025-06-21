@@ -34,10 +34,12 @@
   "lanServer.maxPlayers": "Max Players",
   "lanServer.maxPlayers.invalid": "Not a valid number of players.\nPlease enter a number greater than %s.",
   "lanServer.motd": "MOTD",
+  "lanServer.settingsForOthers": "Settings for other players",
   "autolan.tunnel.none": "None",
   "autolan.tunnel.ngrok": "ngrok",
 
   "text.autoconfig.autolan.title": "Custom LAN Options",
   "autolan.commands.enabled": "Commands enabled for all players (permission level 2)",
-  "autolan.commands.error": "Failed to set player permissions"
+  "autolan.commands.error": "Failed to set player permissions",
+  "autolan.error.already_started": "LAN is already started. To change settings, restart the world."
 }

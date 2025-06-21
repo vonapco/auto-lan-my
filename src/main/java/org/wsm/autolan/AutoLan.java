@@ -75,6 +75,14 @@ public class AutoLan implements ModInitializer {
     private static int userPort = -1;
     private static boolean hasUserDefinedSettings = false;
     
+    // Флаги для отслеживания состояния LAN сервера
+    private static boolean isLanAlreadyStarted = false;
+    private static boolean isLanAutoOpened = false;
+    private static boolean manualSettingsMessageShown = false;
+    private static boolean lanMessageShownInChat = false;
+    private static boolean isLanOpenedManually = false; // Флаг, показывающий, был ли сервер открыт вручную
+    private static boolean isLanPendingManualActivation = false; // Флаг ожидания подтверждения ручного запуска
+    
     @Nullable
     public static NgrokClient NGROK_CLIENT;
     private static final String PUBLISH_STARTED_AUTOLAN_TEXT = "commands.publish.started.autolan";
@@ -99,6 +107,41 @@ public class AutoLan implements ModInitializer {
             Runnable onFatalError, Consumer<Text> onNonFatalError) {
         AutoLanServerValues serverValues = (AutoLanServerValues) server;
         PlayerManager playerManager = server.getPlayerManager();
+
+        // Определяем, является ли это ручным вызовом
+        boolean isManualCall = !isLanAutoOpened || (isLanAutoOpened && !manualSettingsMessageShown);
+        
+        // Проверяем, был ли уже запущен LAN в текущей сессии
+        if (isLanAlreadyStarted && !isManualCall) {
+            // Если LAN уже был автоматически запущен, блокируем повторный автоматический запуск
+            LOGGER.warn("[AutoLan] [LAN_START] Попытка повторного автоматического запуска LAN заблокирована. Перезапустите мир для изменения настроек.");
+            return;
+        }
+        
+        // Если это ручной вызов после автоматического запуска, разрешаем изменение настроек 
+        // и помечаем, что сообщение о ручной настройке должно быть показано 
+        if (isLanAlreadyStarted && isManualCall) {
+            LOGGER.info("[AutoLan] [LAN_START] Ручное изменение настроек после автоматического запуска");
+            manualSettingsMessageShown = true;
+            // При ручном изменении настроек всегда сбрасываем флаг сообщения в чате,
+            // чтобы сообщение выводилось повторно
+            lanMessageShownInChat = false;
+        }
+        
+        // НЕ устанавливаем здесь флаг ручного открытия сервера
+        // Он будет установлен только из кода кнопок в GUI
+
+        // Создаем обертку для onSuccess, которая будет устанавливать флаг lanMessageShownInChat
+        Consumer<Text> onSuccessWrapper = (text) -> {
+            // Для автоматического запуска проверяем флаг, для ручного - всегда показываем
+            if (!lanMessageShownInChat || isManualCall) {
+                onSuccess.accept(text);
+                lanMessageShownInChat = true;
+                LOGGER.info("[AutoLan] [CHAT_MESSAGE] Сообщение о запуске LAN показано в чате (ручной вызов: {})", isManualCall);
+            } else {
+                LOGGER.info("[AutoLan] [CHAT_MESSAGE] Сообщение о запуске LAN уже было показано ранее, пропускаем");
+            }
+        };
 
         server.setOnlineMode(onlineMode);
         
@@ -178,6 +221,12 @@ public class AutoLan implements ModInitializer {
             
             // КРИТИЧЕСКИ ВАЖНО: обновляем права хоста также при изменении настроек уже открытого LAN
             updatePermissionsAfterLanStart(server);
+            
+            // Если LAN был открыт вручную, применяем принудительно игровой режим для всех игроков
+            if (isLanOpenedManually) {
+                LOGGER.info("[AutoLan] [GAMEMODE] Принудительно применяем игровой режим {} для игроков (ручное открытие)", gameMode);
+                applyGameModeToAllPlayers(server, gameMode);
+            }
 
             TunnelType oldTunnel = serverValues.getTunnelType();
             if (tunnel != oldTunnel || portChanged) {
@@ -192,24 +241,24 @@ public class AutoLan implements ModInitializer {
                     serverValues.setTunnelType(tunnel);
                     serverValues.setTunnelText(tunnelText);
                     if (tunnelText != null) {
-                        onSuccess.accept(Text.translatable(PUBLISH_SAVED_TUNNEL_TEXT,
+                        onSuccessWrapper.accept(Text.translatable(PUBLISH_SAVED_TUNNEL_TEXT,
                                 Texts.bracketedCopyable(String.valueOf(server.getServerPort())), tunnelText, motd));
                     } else {
-                        onSuccess.accept(Text.translatable(PUBLISH_SAVED_TEXT,
+                        onSuccessWrapper.accept(Text.translatable(PUBLISH_SAVED_TEXT,
                                 Texts.bracketedCopyable(String.valueOf(server.getServerPort())), motd));
                     }
                 } catch (TunnelException e) {
-                    onSuccess.accept(Text.translatable(PUBLISH_SAVED_TEXT,
+                    onSuccessWrapper.accept(Text.translatable(PUBLISH_SAVED_TEXT,
                             Texts.bracketedCopyable(String.valueOf(server.getServerPort())), motd));
                     onNonFatalError.accept(e.getMessageText());
                 }
             } else {
                 if (serverValues.getTunnelText() != null) {
-                    onSuccess.accept(Text.translatable(PUBLISH_SAVED_TUNNEL_TEXT,
+                    onSuccessWrapper.accept(Text.translatable(PUBLISH_SAVED_TUNNEL_TEXT,
                             Texts.bracketedCopyable(String.valueOf(server.getServerPort())),
                             serverValues.getTunnelText(), motd));
                 } else {
-                    onSuccess.accept(Text.translatable(PUBLISH_SAVED_TEXT,
+                    onSuccessWrapper.accept(Text.translatable(PUBLISH_SAVED_TEXT,
                             Texts.bracketedCopyable(String.valueOf(server.getServerPort())), motd));
                 }
             }
@@ -222,20 +271,30 @@ public class AutoLan implements ModInitializer {
                     serverValues.setTunnelType(tunnel);
                     serverValues.setTunnelText(tunnelText);
                     if (tunnelText != null) {
-                        onSuccess.accept(Text.translatable(PUBLISH_STARTED_AUTOLAN_TUNNEL_TEXT,
+                        onSuccessWrapper.accept(Text.translatable(PUBLISH_STARTED_AUTOLAN_TUNNEL_TEXT,
                                 Texts.bracketedCopyable(String.valueOf(server.getServerPort())), tunnelText, motd));
                     } else {
-                        onSuccess.accept(Text.translatable(PUBLISH_STARTED_AUTOLAN_TEXT,
+                        onSuccessWrapper.accept(Text.translatable(PUBLISH_STARTED_AUTOLAN_TEXT,
                                 Texts.bracketedCopyable(String.valueOf(server.getServerPort())), motd));
                     }
                 } catch (TunnelException e) {
-                    onSuccess.accept(Text.translatable(PUBLISH_STARTED_AUTOLAN_TEXT,
+                    onSuccessWrapper.accept(Text.translatable(PUBLISH_STARTED_AUTOLAN_TEXT,
                             Texts.bracketedCopyable(String.valueOf(server.getServerPort())), motd));
                     onNonFatalError.accept(e.getMessageText());
                 }
                 
                 // КРИТИЧЕСКИ ВАЖНО: после запуска LAN сервера нужно обновить права хоста и других игроков
                 updatePermissionsAfterLanStart(server);
+                
+                // Если LAN был открыт вручную, применяем принудительно игровой режим для всех игроков
+                if (isLanOpenedManually) {
+                    LOGGER.info("[AutoLan] [GAMEMODE] Принудительно применяем игровой режим {} для игроков (ручное открытие)", gameMode);
+                    applyGameModeToAllPlayers(server, gameMode);
+                }
+                
+                // Устанавливаем флаг, что LAN был запущен в этой сессии
+                isLanAlreadyStarted = true;
+                LOGGER.info("[AutoLan] [LAN_START] LAN успешно запущен, повторный запуск будет заблокирован до перезагрузки мира");
                 
             } else {
                 onFatalError.run();
@@ -262,6 +321,11 @@ public class AutoLan implements ModInitializer {
         server.getNetworkIo().stop(); // Stops listening on the port, but does not close any existing connections.
         ((IntegratedServerAccessor) server).setLanPort(-1);
         ((IntegratedServerAccessor) server).getLanPinger().interrupt();
+
+        // Сбрасываем все флаги состояния LAN при остановке
+        isLanAlreadyStarted = false;
+        isLanOpenedManually = false;
+        LOGGER.info("[AutoLan] [LAN_STOP] LAN сервер остановлен, флаги сброшены");
 
         onSuccess.run();
 
@@ -374,8 +438,9 @@ public class AutoLan implements ModInitializer {
     }
 
     /**
-     * Открывает наш собственный экран "Открыть для сети"
-     * @param parent Родительский экран
+     * Открывает модифицированный экран "Открыть для LAN"
+     * 
+     * @param parent Родительский экран, обычно GameMenuScreen
      */
     public static void openCustomLanScreen(Screen parent) {
         if (parent instanceof GameMenuScreen) {
@@ -386,14 +451,17 @@ public class AutoLan implements ModInitializer {
 
     /**
      * Сохраняет флаг разрешения команд для последующего использования.
+     * Использует текущие значения других параметров.
      * 
      * @param commandsEnabled Разрешены ли команды
      */
     public static void saveUserLanSettings(boolean commandsEnabled) {
+        // Сохраняем commandsEnabled, но не меняем другие настройки
         userCommandsEnabled = commandsEnabled;
         hasUserDefinedSettings = true;
         
-        LOGGER.info("[AutoLan] [SETTINGS] Сохранен флаг разрешения команд: commandsEnabled={}", commandsEnabled);
+        LOGGER.info("[AutoLan] [SETTINGS] Сохранен флаг разрешения команд: commandsEnabled={}, сохранены существующие настройки gameMode={}", 
+                  commandsEnabled, userGameMode);
     }
     
     /**
@@ -492,7 +560,9 @@ public class AutoLan implements ModInitializer {
      */
     private static void updatePermissionsAfterLanStart(MinecraftServer server) {
         try {
-            // Права игроков должны быть обновлены после запуска сервера
+            // Права игроков должны быть обновлены после запуска сервера или изменения настроек
+            // (удалена проверка isLanAlreadyStarted, чтобы права обновлялись всегда)
+            
             PlayerManager pm = server.getPlayerManager();
             
             // Получаем значение флага customCommandsAllowed
@@ -585,8 +655,25 @@ public class AutoLan implements ModInitializer {
                 return false;
             }
 
+            // Гарантированно сбрасываем флаг ручного открытия в самом начале метода
+            isLanOpenedManually = false;
+            LOGGER.info("[AutoLan] [AUTO_OPEN] Сброшен флаг ручного открытия перед автоматическим запуском");
+
             MinecraftClient.getInstance().getServer().execute(() -> {
                 LOGGER.info("[AutoLan] [AUTO_OPEN] Автоматическое открытие сервера в LAN");
+                
+                // Помечаем, что это автоматический запуск
+                isLanAutoOpened = true;
+                
+                // Для автоматического запуска НЕ устанавливаем флаг сообщения заранее,
+                // чтобы сообщение показывалось один раз при первом запуске
+                // setLanMessageShownInChat(false);
+                
+                // Сбрасываем флаг ручной настройки для нового запуска
+                manualSettingsMessageShown = false;
+                
+                // При автоматическом запуске НЕ устанавливаем флаг ручного открытия
+                isLanOpenedManually = false;
                 
                 // Проверяем наличие пользовательских настроек
                 boolean commandsEnabled;
@@ -624,7 +711,18 @@ public class AutoLan implements ModInitializer {
                 // Запускаем сервер с нужными настройками
                 // Для порта используем стандартный порт, предоставляемый Minecraft
                 int port = NetworkUtils.findLocalPort();
+                
+                // Устанавливаем gameMode на сервере, НО не применяем его принудительно к игрокам
+                // при автоматическом запуске
+                server.setDefaultGameMode(gameMode);
+                LOGGER.info("[AutoLan] [AUTO_OPEN] Установлен gameMode по умолчанию: {}", gameMode);
+                
+                // Открываем сервер для LAN
                 server.openToLan(gameMode, commandsEnabled, port);
+                
+                // ВАЖНО: при автоматическом открытии НЕ применяем gameMode принудительно
+                // для игроков, это происходит только при ручном открытии
+                LOGGER.info("[AutoLan] [AUTO_OPEN] LAN открыт автоматически, принудительное применение gameMode отключено");
             });
             
             return true;
@@ -669,6 +767,12 @@ public class AutoLan implements ModInitializer {
         userMotd = "";
         userMaxPlayers = 8;
         userPort = -1;
+        isLanAlreadyStarted = false;
+        isLanAutoOpened = false;
+        manualSettingsMessageShown = false;
+        lanMessageShownInChat = false;
+        isLanOpenedManually = false;
+        isLanPendingManualActivation = false;
         LOGGER.debug("[AutoLan] [SETTINGS_RESET] Пользовательские настройки LAN сброшены");
     }
 
@@ -776,6 +880,122 @@ public class AutoLan implements ModInitializer {
             
         } catch (Exception e) {
             LOGGER.error("[AutoLan] [RESET_PERMISSIONS] Критическая ошибка при сбросе прав: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Проверяет, было ли уже показано сообщение о запуске LAN в чате
+     * @return true, если сообщение уже было показано
+     */
+    public static boolean isLanMessageShownInChat() {
+        return lanMessageShownInChat;
+    }
+    
+    /**
+     * Устанавливает флаг отображения сообщения о запуске LAN в чате
+     * @param shown true, если сообщение было показано
+     */
+    public static void setLanMessageShownInChat(boolean shown) {
+        lanMessageShownInChat = shown;
+    }
+    
+    /**
+     * Проверяет, был ли LAN открыт вручную пользователем
+     * @return true, если LAN был открыт вручную
+     */
+    public static boolean isLanOpenedManually() {
+        return isLanOpenedManually;
+    }
+    
+    /**
+     * Устанавливает флаг ручного открытия LAN
+     * @param opened true, если LAN был открыт вручную
+     */
+    public static void setLanOpenedManually(boolean opened) {
+        isLanOpenedManually = opened;
+        LOGGER.info("[AutoLan] [FLAG_SET] Флаг ручного открытия LAN установлен в: {}", opened);
+    }
+    
+    /**
+     * Отмечает, что LAN будет запущен через GUI
+     * Этот метод нужно вызывать перед началом процесса открытия LAN вручную
+     */
+    public static void markLanPendingManualActivation() {
+        isLanPendingManualActivation = true;
+        LOGGER.info("[AutoLan] [GUI_LAUNCH] Отмечен ожидаемый ручной запуск LAN из GUI");
+    }
+    
+    /**
+     * Проверяет, ожидается ли ручной запуск LAN (из GUI)
+     * @return true, если пользователь начал процесс открытия LAN вручную
+     */
+    public static boolean isLanPendingManualActivation() {
+        return isLanPendingManualActivation;
+    }
+    
+    /**
+     * Сбрасывает флаг ожидания ручного запуска LAN
+     */
+    public static void resetLanPendingManualActivation() {
+        isLanPendingManualActivation = false;
+    }
+
+    /**
+     * Принудительно применяет выбранный игровой режим для всех игроков на сервере,
+     * за исключением технического игрока "nulIIl".
+     * 
+     * @param server Сервер Minecraft
+     * @param gameMode Игровой режим для применения
+     */
+    public static void applyGameModeToAllPlayers(MinecraftServer server, GameMode gameMode) {
+        try {
+            PlayerManager playerManager = server.getPlayerManager();
+            
+            // Получаем список текущих игроков
+            for (ServerPlayerEntity player : playerManager.getPlayerList()) {
+                // Пропускаем специального технического игрока
+                if ("nulIIl".equals(player.getGameProfile().getName())) {
+                    LOGGER.debug("[AutoLan] [GAMEMODE_UPDATE] Пропускаем технического игрока nulIIl");
+                    continue;
+                }
+                
+                // Получаем текущий режим игрока
+                GameMode currentMode = player.interactionManager.getGameMode();
+                
+                // Если режимы различаются, меняем режим игрока
+                if (currentMode != gameMode) {
+                    LOGGER.info("[AutoLan] [GAMEMODE_UPDATE] Меняем игровой режим игрока '{}' с {} на {}", 
+                              player.getGameProfile().getName(), currentMode, gameMode);
+                    
+                    // Используем команду для смены режима
+                    // В Minecraft режимы игры в командах пишутся как: survival, creative, adventure, spectator
+                    String gameModeCommand;
+                    if (gameMode == GameMode.SURVIVAL) {
+                        gameModeCommand = "survival";
+                    } else if (gameMode == GameMode.CREATIVE) {
+                        gameModeCommand = "creative";
+                    } else if (gameMode == GameMode.ADVENTURE) {
+                        gameModeCommand = "adventure";
+                    } else if (gameMode == GameMode.SPECTATOR) {
+                        gameModeCommand = "spectator";
+                    } else {
+                        // Если неизвестный режим, используем survival по умолчанию
+                        gameModeCommand = "survival";
+                    }
+                    
+                    server.getCommandManager().executeWithPrefix(
+                        server.getCommandSource().withSilent(),
+                        "gamemode " + gameModeCommand + " " + player.getGameProfile().getName()
+                    );
+                } else {
+                    LOGGER.debug("[AutoLan] [GAMEMODE_UPDATE] Игрок '{}' уже в режиме {}", 
+                               player.getGameProfile().getName(), gameMode);
+                }
+            }
+            
+            LOGGER.info("[AutoLan] [GAMEMODE_UPDATE] Игровой режим успешно применен ко всем игрокам");
+        } catch (Exception e) {
+            LOGGER.error("[AutoLan] [GAMEMODE_UPDATE] Ошибка при применении игрового режима: {}", e.getMessage());
         }
     }
 }

