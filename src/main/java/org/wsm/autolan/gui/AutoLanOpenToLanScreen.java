@@ -21,6 +21,7 @@ import org.wsm.autolan.AutoLan;
 import org.wsm.autolan.AutoLanState;
 import org.wsm.autolan.util.ServerUtil;
 import net.minecraft.world.GameMode;
+import net.minecraft.client.gui.DrawContext;
 
 public class AutoLanOpenToLanScreen extends OpenToLanScreen {
     private static final Text START_TEXT = Text.translatable("lanServer.start");
@@ -83,6 +84,19 @@ public class AutoLanOpenToLanScreen extends OpenToLanScreen {
                 }
             }
         }
+    }
+    
+    @Override
+    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        // Переопределяем метод render для предотвращения проблемы с blur
+        // Отрисовываем полупрозрачный фон без вызова renderBackground через super
+        context.fillGradient(0, 0, this.width, this.height, -1072689136, -804253680);
+        
+        // Вместо вызова базового метода, рисуем все элементы вручную
+        context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, 50, 0xFFFFFF);
+        
+        // Отрисовываем элементы управления
+        super.render(context, mouseX, mouseY, delta);
     }
 
     private void startOrSaveCustom() {

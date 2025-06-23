@@ -3,15 +3,21 @@ package org.wsm.autolan;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.command.v2.ArgumentTypeRegistry;
 import org.apache.commons.text.StringSubstitutor;
 import org.jetbrains.annotations.Nullable;
 
@@ -25,7 +31,6 @@ import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.ConfigHolder;
 import me.shedaniel.autoconfig.serializer.Toml4jConfigSerializer;
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.command.v2.ArgumentTypeRegistry;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.LanServerPinger;
@@ -58,12 +63,45 @@ import net.minecraft.util.WorldSavePath;
 import net.minecraft.world.World;
 import net.minecraft.server.OperatorList;
 import net.minecraft.server.OperatorEntry;
+import org.wsm.autolan.agent.AutoLanAgent;
+
+import net.minecraft.server.command.ServerCommandSource;
+
+import net.minecraft.entity.Entity;
+import net.minecraft.SharedConstants;
+import net.minecraft.registry.DynamicRegistryManager;
+
+import net.minecraft.resource.ResourceManager;
+import net.minecraft.server.command.CommandManager;
+
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
+import net.minecraft.world.GameMode;
+import net.minecraft.server.dedicated.command.OpCommand;
+import net.minecraft.server.dedicated.command.DeOpCommand;
+import net.minecraft.server.dedicated.command.BanCommand;
+import net.minecraft.server.dedicated.command.BanIpCommand;
+import net.minecraft.server.dedicated.command.BanListCommand;
+import net.minecraft.server.dedicated.command.PardonCommand;
+import net.minecraft.server.dedicated.command.PardonIpCommand;
+import net.minecraft.server.dedicated.command.WhitelistCommand;
+
+
+import net.minecraft.server.command.CommandManager.RegistrationEnvironment;
+import net.fabricmc.fabric.api.command.v2.ArgumentTypeRegistry;
+
+import com.mojang.serialization.Codec;
 
 public class AutoLan implements ModInitializer {
     public static final String MODID = "autolan";
     public static final Logger LOGGER = LoggerFactory.getLogger("AutoLan");
 
     public static ConfigHolder<AutoLanConfig> CONFIG;
+    public static AutoLanAgent AGENT;
+    public static final Map<String, String> activeTunnels = new ConcurrentHashMap<>();
+    public static NgrokClient NGROK_CLIENT;
     
     // Флаги для отслеживания пользовательских настроек LAN
     private static boolean userDefinedLanSettings = false;
@@ -83,8 +121,6 @@ public class AutoLan implements ModInitializer {
     private static boolean isLanOpenedManually = false; // Флаг, показывающий, был ли сервер открыт вручную
     private static boolean isLanPendingManualActivation = false; // Флаг ожидания подтверждения ручного запуска
     
-    @Nullable
-    public static NgrokClient NGROK_CLIENT;
     private static final String PUBLISH_STARTED_AUTOLAN_TEXT = "commands.publish.started.autolan";
     private static final String PUBLISH_STARTED_AUTOLAN_TUNNEL_TEXT = "commands.publish.started.autolan.tunnel";
     private static final String PUBLISH_PORT_CHANGE_FAILED_TEXT = "commands.publish.failed.port_change";
@@ -128,9 +164,6 @@ public class AutoLan implements ModInitializer {
             lanMessageShownInChat = false;
         }
         
-        // НЕ устанавливаем здесь флаг ручного открытия сервера
-        // Он будет установлен только из кода кнопок в GUI
-
         // Создаем обертку для onSuccess, которая будет устанавливать флаг lanMessageShownInChat
         Consumer<Text> onSuccessWrapper = (text) -> {
             // Для автоматического запуска проверяем флаг, для ручного - всегда показываем
@@ -215,8 +248,7 @@ public class AutoLan implements ModInitializer {
             server.setDefaultGameMode(gameMode);
             // The players' permissions may have changed, so send the new command trees.
             for (ServerPlayerEntity player : playerManager.getPlayerList()) {
-                playerManager.sendCommandTree(player); // Do not use server.getCommandManager().sendCommandTree(player)
-                                                       // directly or things like the gamemode switcher will not update!
+                playerManager.sendCommandTree(player);
             }
             
             // КРИТИЧЕСКИ ВАЖНО: обновляем права хоста также при изменении настроек уже открытого LAN
@@ -237,9 +269,22 @@ public class AutoLan implements ModInitializer {
                 }
 
                 try {
-                    Text tunnelText = tunnel.start(server);
+                    String tunnelUrl = tunnel.start(server);
                     serverValues.setTunnelType(tunnel);
+                    
+                    Text tunnelText = null;
+                    if (tunnelUrl != null) {
+                        activeTunnels.clear();
+                        activeTunnels.put("minecraft", tunnelUrl);
+                        tunnelText = Texts.bracketedCopyable(tunnelUrl.replaceFirst("^tcp:\\/\\/", ""));
+                        
+                        // Обновляем информацию о туннеле в агенте
+                        if (AGENT != null) {
+                            AGENT.updateTunnelUrl("minecraft", tunnelUrl);
+                        }
+                    }
                     serverValues.setTunnelText(tunnelText);
+
                     if (tunnelText != null) {
                         onSuccessWrapper.accept(Text.translatable(PUBLISH_SAVED_TUNNEL_TEXT,
                                 Texts.bracketedCopyable(String.valueOf(server.getServerPort())), tunnelText, motd));
@@ -267,9 +312,22 @@ public class AutoLan implements ModInitializer {
                 server.setDefaultGameMode(gameMode); // Prevents the gamemode from being forced.
 
                 try {
-                    Text tunnelText = tunnel.start(server);
+                    String tunnelUrl = tunnel.start(server);
                     serverValues.setTunnelType(tunnel);
+                    
+                    Text tunnelText = null;
+                    if (tunnelUrl != null) {
+                        activeTunnels.clear();
+                        activeTunnels.put("minecraft", tunnelUrl);
+                        tunnelText = Texts.bracketedCopyable(tunnelUrl.replaceFirst("^tcp:\\/\\/", ""));
+                        
+                        // Обновляем информацию о туннеле в агенте
+                        if (AGENT != null) {
+                            AGENT.updateTunnelUrl("minecraft", tunnelUrl);
+                        }
+                    }
                     serverValues.setTunnelText(tunnelText);
+
                     if (tunnelText != null) {
                         onSuccessWrapper.accept(Text.translatable(PUBLISH_STARTED_AUTOLAN_TUNNEL_TEXT,
                                 Texts.bracketedCopyable(String.valueOf(server.getServerPort())), tunnelText, motd));
@@ -346,54 +404,17 @@ public class AutoLan implements ModInitializer {
         LOGGER.info("[AutoLan] Инициализация мода AutoLan");
         Thread ngrokInstallThread = new Thread(() -> new NgrokClient.Builder().build());
         ngrokInstallThread.start();
-        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            MinecraftClient mc = MinecraftClient.getInstance();
-            mc.execute(() -> {
-                if (mc.isIntegratedServerRunning() && mc.getServer() != null) {
-                    // При автоматическом открытии мира для LAN нужно проверить, есть ли сохраненные настройки
-                    IntegratedServer server = mc.getServer();
-                    
-                    // Сбрасываем права всем игрокам при входе в мир
-                    resetAllPlayersPermissions(server);
-                    
-                    // Устанавливаем customCommandsAllowed согласно сохраненным пользовательским настройкам
-                    // или берем текущее значение areCommandsAllowed
-                    boolean effectiveCommandsAllowed;
-                    
-                    if (hasUserDefinedSettings()) {
-                        // Используем сохраненные пользователем настройки
-                        boolean savedCommandsEnabled = getUserCommandsEnabled();
-                        LOGGER.info("[AutoLan] [AUTO_OPEN] Используем сохраненные пользовательские настройки: commandsEnabled={}", savedCommandsEnabled);
-                        effectiveCommandsAllowed = savedCommandsEnabled;
-                        
-                        // Обновляем также стандартный флаг areCommandsAllowed для совместимости
-                        ((SetCommandsAllowed) server.getSaveProperties()).setCommandsAllowed(savedCommandsEnabled);
-                    } else {
-                        // Если пользователь еще не задавал настройки, используем текущее значение areCommandsAllowed
-                        effectiveCommandsAllowed = server.getSaveProperties().areCommandsAllowed();
-                        LOGGER.info("[AutoLan] [AUTO_OPEN] Используем стандартные настройки: areCommandsAllowed={}", effectiveCommandsAllowed);
-                    }
-                    
-                    // Устанавливаем customCommandsAllowed в соответствии с выбранными настройками
-                    try {
-                        if (server.getOverworld() != null && server.getOverworld().getPersistentStateManager() != null) {
-                            AutoLanState state = server.getOverworld().getPersistentStateManager().getOrCreate(AutoLanState.STATE_TYPE);
-                            state.setCustomCommandsAllowed(effectiveCommandsAllowed);
-                            LOGGER.info("[AutoLan] [AUTO_OPEN] Установлен флаг customCommandsAllowed = {}", effectiveCommandsAllowed);
-                        }
-                    } catch (Exception e) {
-                        LOGGER.error("[AutoLan] [AUTO_OPEN] Ошибка при установке флага customCommandsAllowed", e);
-                    }
-                    
-                    // Затем выполняем команду publish
-                    mc.getServer().getCommandManager().executeWithPrefix(mc.getServer().getCommandSource(), "publish");
-                }
-            });
-        });
         AutoConfig.register(AutoLanConfig.class, Toml4jConfigSerializer::new);
         CONFIG = AutoConfig.getConfigHolder(AutoLanConfig.class);
+        
+        // Инициализация агента при старте игры
+        AGENT = new AutoLanAgent();
+        AGENT.init();
+
+        // Регистрация команд для режима интегрированного сервера
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             if (environment.integrated) {
+                // Здесь используем стандартную регистрацию команд
                 OpCommand.register(dispatcher);
                 DeOpCommand.register(dispatcher);
                 BanCommand.register(dispatcher);
@@ -402,11 +423,91 @@ public class AutoLan implements ModInitializer {
                 PardonCommand.register(dispatcher);
                 PardonIpCommand.register(dispatcher);
                 WhitelistCommand.register(dispatcher);
+                
+                // Примечание: для ограничения админ-команд теперь используются миксины BanCommandMixin,
+                // BanIpCommandMixin, WhitelistCommandMixin и др.
             }
         });
-
+        
+        // Регистрация аргумента туннеля
         ArgumentTypeRegistry.registerArgumentType(Identifier.of(MODID, "tunnel"), TunnelArgumentType.class,
                 ConstantArgumentSerializer.of(TunnelArgumentType::tunnel));
+
+        // Регистрация события входа в мир
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+            LOGGER.info("[AutoLan] [WORLD_JOIN] Игрок вошел в мир");
+            
+            MinecraftClient mc = MinecraftClient.getInstance();
+            mc.execute(() -> {
+                if (mc.isIntegratedServerRunning() && mc.getServer() != null) {
+                    mc.getServer().getCommandManager().executeWithPrefix(mc.getServer().getCommandSource(), "publish");
+                }
+            });
+        });
+
+        // Регистрация события отключения от сервера/мира
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            // Сбрасываем все флаги при выходе из мира
+            LOGGER.info("[AutoLan] [WORLD_EXIT] Игрок покинул мир. Сброс всех флагов состояния LAN.");
+            resetUserLanSettings();
+            
+            // Останавливаем туннель при выходе из мира
+            stopTunnels();
+        });
+        
+        // Добавляем хук для остановки агента при завершении игры
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            // Останавливаем туннели
+            stopTunnels();
+            
+            // Останавливаем агент
+            if (AGENT != null) {
+                LOGGER.info("[AutoLan] Shutting down agent on game exit");
+                AGENT.shutdown();
+            }
+        }));
+        
+        LOGGER.info("[AutoLan] Mod loaded!");
+    }
+
+    /**
+     * Останавливает все активные туннели
+     */
+    private static void stopTunnels() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.getServer() != null) {
+            try {
+                AutoLanServerValues serverValues = (AutoLanServerValues) mc.getServer();
+                TunnelType tunnelType = serverValues.getTunnelType();
+                
+                if (tunnelType != null && tunnelType != TunnelType.NONE) {
+                    LOGGER.info("[AutoLan] Stopping tunnels on world exit");
+                    try {
+                        tunnelType.stop(mc.getServer());
+                        serverValues.setTunnelType(TunnelType.NONE);
+                        serverValues.setTunnelText(null);
+                    } catch (TunnelType.TunnelException e) {
+                        LOGGER.error("[AutoLan] Error stopping tunnel", e);
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.error("[AutoLan] Error while stopping tunnels", e);
+            }
+        }
+        
+        // Особый случай для ngrok - закрываем клиент напрямую на всякий случай
+        if (NGROK_CLIENT != null) {
+            try {
+                LOGGER.info("[AutoLan] Killing ngrok client directly");
+                NGROK_CLIENT.kill();
+                NGROK_CLIENT = null;
+            } catch (Exception e) {
+                LOGGER.error("[AutoLan] Failed to kill ngrok client", e);
+            }
+        }
+        
+        // Очищаем список активных туннелей
+        activeTunnels.clear();
     }
 
     /**

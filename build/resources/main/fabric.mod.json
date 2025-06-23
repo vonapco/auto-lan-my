@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "autolan",
-  "version": "1.21.5-v1.0.0",
+  "version": "1.21.6-v1.0.0",
 
   "name": "AutoLan",
   "description": "Automatically Opens To Lan Upon Loading A Minecraft World.",
@@ -23,7 +23,7 @@
 
   "depends": {
     "fabricloader": ">=0.15.10",
-    "minecraft": "1.21.5",
+    "minecraft": "1.21.6",
     "java": ">=21",
     "fabric-resource-loader-v0": "*",
     "fabric-registry-sync-v0": "*",

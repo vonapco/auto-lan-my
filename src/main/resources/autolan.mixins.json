@@ -9,7 +9,6 @@
     "MinecraftServerMixin",
     "LevelPropertiesMixin",
     "ServerConfigListAccessor",
-    "GenericCommandMixin",
     "PublishCommandMixin",
     "BanCommandMixin",
     "BanIpCommandMixin",

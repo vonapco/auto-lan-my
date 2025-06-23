@@ -21,7 +21,7 @@ public enum TunnelType implements StringIdentifiable {
     NONE("none"),
     NGROK("ngrok") {
         @Override
-        public @Nullable Text start(MinecraftServer server) throws TunnelException {
+        public @Nullable String start(MinecraftServer server) throws TunnelException {
             String authtoken = AutoLan.CONFIG.getConfig().ngrokAuthtoken.strip();
             if (authtoken.isEmpty()) {
                 throw new TunnelException(ScreenTexts.composeGenericOptionText(NGROK_FAILED,
@@ -41,7 +41,7 @@ public enum TunnelType implements StringIdentifiable {
                         .withAddr(server.getServerPort())
                         .build());
 
-                return Texts.bracketedCopyable(tunnel.getPublicUrl().replaceFirst("^tcp:\\/\\/", ""));
+                return tunnel.getPublicUrl();
             } catch (Exception e) {
                 e.printStackTrace();
                 throw new TunnelException(
@@ -107,7 +107,7 @@ public enum TunnelType implements StringIdentifiable {
     }
 
     @Nullable
-    public Text start(MinecraftServer server) throws TunnelException {
+    public String start(MinecraftServer server) throws TunnelException {
         return null;
     }
 

@@ -132,7 +132,11 @@ public class CustomOpenToLanScreen extends Screen {
     
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        this.renderBackground(context, mouseX, mouseY, delta);
+        // Здесь больше не вызываем renderBackground напрямую, так как в Minecraft 1.21.6
+        // это приводит к двойному размытию в одном кадре
+        
+        // Отрисовываем полупрозрачный фон без вызова renderBackground
+        context.fillGradient(0, 0, this.width, this.height, -1072689136, -804253680);
         
         // Рендерим заголовок
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, 50, 0xFFFFFF);
