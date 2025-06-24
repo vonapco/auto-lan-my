@@ -11,6 +11,13 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+// Импорты для менеджеров
+import org.wsm.autolan.manager.ConfigManager;
+import org.wsm.autolan.manager.NgrokKeyManager;
+import org.wsm.autolan.manager.NgrokBootstrapper;
+// Импорты для событий жизненного цикла сервера
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import org.apache.commons.text.StringSubstitutor;
 import org.jetbrains.annotations.Nullable;
@@ -64,6 +71,8 @@ public class AutoLan implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("AutoLan");
 
     public static ConfigHolder<AutoLanConfig> CONFIG;
+    private static boolean ngrokInitialized = false; // Флаг для отслеживания инициализации ngrok
+    private static String currentClientId = null; // Хранение clientId для использования при остановке
     
     // Флаги для отслеживания пользовательских настроек LAN
     private static boolean userDefinedLanSettings = false;
@@ -407,6 +416,66 @@ public class AutoLan implements ModInitializer {
 
         ArgumentTypeRegistry.registerArgumentType(Identifier.of(MODID, "tunnel"), TunnelArgumentType.class,
                 ConstantArgumentSerializer.of(TunnelArgumentType::tunnel));
+
+        // Регистрация событий жизненного цикла сервера для управления ngrok
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            if (server instanceof IntegratedServer) {
+                LOGGER.info("[AutoLan] Integrated server started.");
+                // Запускаем ngrok только если он еще не был инициализирован
+                // и если это интегрированный сервер (одиночная игра)
+                if (!ngrokInitialized) {
+                    LOGGER.info("[AutoLan] Initializing Ngrok components...");
+                    currentClientId = ConfigManager.getClientId(); // Получаем и сохраняем clientId
+                    if (currentClientId == null || currentClientId.trim().isEmpty()) {
+                        LOGGER.error("[AutoLan] Failed to obtain a valid clientId. Ngrok setup cannot proceed.");
+                        return;
+                    }
+                    LOGGER.info("[AutoLan] Using clientId: {}", currentClientId);
+
+                    String ngrokKey = NgrokKeyManager.resolveNgrokKey(currentClientId);
+                    if (ngrokKey != null) {
+                        LOGGER.info("[AutoLan] Ngrok key resolved. Attempting to start Ngrok.");
+                        boolean success = NgrokBootstrapper.startNgrok(ngrokKey, currentClientId);
+                        if (success) {
+                            LOGGER.info("[AutoLan] Ngrok started successfully via NgrokBootstrapper.");
+                            ngrokInitialized = true;
+                        } else {
+                            LOGGER.error("[AutoLan] Failed to start Ngrok via NgrokBootstrapper.");
+                            // ngrokInitialized останется false, попытка может быть предпринята снова,
+                            // но resolveNgrokKey и startNgrok имеют свою логику обработки ошибок/повторов.
+                        }
+                    } else {
+                        LOGGER.warn("[AutoLan] Failed to resolve ngrok key. Ngrok will not be started.");
+                    }
+                } else {
+                    LOGGER.info("[AutoLan] Ngrok already initialized, skipping.");
+                }
+            }
+        });
+
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            if (server instanceof IntegratedServer) {
+                LOGGER.info("[AutoLan] Integrated server stopping.");
+                if (ngrokInitialized) {
+                    LOGGER.info("[AutoLan] Shutting down Ngrok components...");
+                    if (currentClientId != null) {
+                        NgrokKeyManager.shutdownCleanup(currentClientId);
+                    } else {
+                        LOGGER.warn("[AutoLan] ClientId is null during server stop. Cannot perform Ngrok cleanup reliably.");
+                        // Попытка получить clientId снова, если он почему-то null
+                        String clientIdForShutdown = ConfigManager.getClientId();
+                        if(clientIdForShutdown != null && !clientIdForShutdown.isEmpty()){
+                            NgrokKeyManager.shutdownCleanup(clientIdForShutdown);
+                        }
+                    }
+                    ngrokInitialized = false;
+                    currentClientId = null; // Сбрасываем clientId
+                    LOGGER.info("[AutoLan] Ngrok components shut down.");
+                } else {
+                    LOGGER.info("[AutoLan] Ngrok was not initialized, no shutdown needed.");
+                }
+            }
+        });
     }
 
     /**
