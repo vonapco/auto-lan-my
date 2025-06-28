@@ -17,21 +17,31 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.HashMap;
 import java.util.Map;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+// import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents; // Will be removed
 
 public class AutoLanAgent {
     public static final Logger LOGGER = LoggerFactory.getLogger("AutoLanAgent");
+
+    // Dedicated executor for agent's own async tasks (not key retrieval)
+    private static final ExecutorService AGENT_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "AutoLanAgent-Worker");
+        thread.setDaemon(true);
+        return thread;
+    });
     
     private final ApiClient apiClient;
-    private ScheduledExecutorService scheduler;
+    private ScheduledExecutorService heartbeatScheduler; // Renamed for clarity
     private String clientId;
     private final AutoLanConfig config;
-    private volatile boolean worldActive = false;
+    private volatile boolean worldActive = false; // Now controlled by setWorldActive
+    private String activeNgrokKey = null; // To store the resolved ngrok key
     
     private NgrokStateManager ngrokStateManager;
     private NgrokKeyManager ngrokKeyManager;
@@ -43,72 +53,129 @@ public class AutoLanAgent {
         this.ngrokStateManager = new NgrokStateManager();
         this.clientIdManager = new PersistentClientIdManager();
         
-        // Регистрируем обработчики событий подключения/отключения
-        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            worldActive = true;
-            LOGGER.info("World joined, setting status to active");
-        });
-        
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-            worldActive = false;
-            LOGGER.info("World disconnected, setting status to inactive");
+        // Event handlers for worldActive are removed from here.
+        // worldActive will be managed by AutoLan class via setWorldActive().
+    }
+
+    public CompletableFuture<Void> init() {
+        if (!AutoLan.AGENT_ENABLED) {
+            LOGGER.info("Auto-LAN Agent is disabled by AGENT_ENABLED=false flag.");
+            return CompletableFuture.completedFuture(null); // Agent not enabled
+        }
+        LOGGER.info("Auto-LAN Agent initialization started...");
+
+        // Chain of CompletableFuture
+        return CompletableFuture.runAsync(() -> {
+            // Step 1: Load or register client ID (blocking within this async step)
+            loadOrRegisterClientId();
+            if (this.clientId == null) {
+                LOGGER.error("Failed to obtain client ID. Agent initialization aborted.");
+                throw new IllegalStateException("Client ID could not be obtained.");
+            }
+            LOGGER.info("Client ID obtained: {}", hideKey(this.clientId));
+            this.ngrokKeyManager = new NgrokKeyManager(ngrokStateManager, apiClient, this.clientId, config);
+        }, AGENT_EXECUTOR)
+        .thenComposeAsync(v -> {
+            // Step 2: Initialize and get ngrok key
+            LOGGER.info("Requesting ngrok key...");
+            return ngrokKeyManager.initializeAndGetActiveKey();
+        }, AGENT_EXECUTOR)
+        .thenAcceptAsync(ngrokKey -> {
+            // Step 3: Store key and start background tasks
+            if (ngrokKey != null && !ngrokKey.isEmpty()) {
+                this.activeNgrokKey = ngrokKey;
+                LOGGER.info("Successfully obtained ngrok key: {}", hideKey(this.activeNgrokKey));
+                startBackgroundTasks(); // Start heartbeats etc.
+                LOGGER.info("Auto-LAN Agent initialized successfully and background tasks started.");
+            } else {
+                LOGGER.error("Failed to obtain a valid ngrok key. Agent initialization failed at key step.");
+                throw new RuntimeException("Failed to obtain a valid ngrok key.");
+            }
+        }, AGENT_EXECUTOR)
+        .exceptionally(ex -> {
+            LOGGER.error("Auto-LAN Agent initialization failed.", ex);
+            // Ensure cleanup if partial initialization occurred
+            shutdownInternal(false); // Don't release key if init failed before getting it
+            return null;
         });
     }
 
-    public void init() {
-        if (!AutoLan.AGENT_ENABLED) {
-            LOGGER.info("Auto-LAN Agent is disabled in the config.");
-            return;
-        }
-        LOGGER.info("Auto-LAN Agent is initializing...");
-
-        loadOrRegisterClientId();
-
-        if (clientId == null) {
-            LOGGER.error("Failed to get client ID. Agent will not start.");
-            return;
+    private void shutdownInternal(boolean releaseKey) {
+        LOGGER.info("Auto-LAN Agent internal shutdown sequence initiated (release key: {})...", releaseKey);
+        if (heartbeatScheduler != null && !heartbeatScheduler.isShutdown()) {
+            heartbeatScheduler.shutdownNow();
+            try {
+                if (!heartbeatScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    LOGGER.warn("Heartbeat scheduler did not terminate in time.");
+                }
+            } catch (InterruptedException e) {
+                LOGGER.warn("Interrupted while waiting for heartbeat scheduler to terminate.");
+                Thread.currentThread().interrupt();
+            }
+            heartbeatScheduler = null;
+            LOGGER.info("Heartbeat scheduler shut down.");
         }
         
-        // Инициализация менеджера ключей ngrok
-        this.ngrokKeyManager = new NgrokKeyManager(ngrokStateManager, apiClient, clientId, config);
-        String ngrokKey = ngrokKeyManager.initializeAndGetActiveKey();
-        
-        if (ngrokKey != null && !ngrokKey.isEmpty()) {
-            LOGGER.info("Установлен активный ключ ngrok: {}", hideKey(ngrokKey));
-        } else {
-            LOGGER.warn("Не удалось получить действительный ключ ngrok");
+        if (releaseKey && ngrokKeyManager != null) {
+            LOGGER.info("Requesting ngrok key release...");
+            ngrokKeyManager.releaseTemporaryKeyIfNeeded(); // This is async now
         }
 
-        startBackgroundTasks();
+        // NgrokKeyManager.shutdown() should be called once when the mod unloads,
+        // not every time an agent instance is shut down, to manage its executor.
+        // This will be handled by AutoLan's main shutdown hook or server stopping event.
+
+        this.activeNgrokKey = null;
+        this.worldActive = false;
+        LOGGER.info("Auto-LAN Agent internal shutdown sequence completed.");
     }
 
     public void shutdown() {
-        LOGGER.info("Auto-LAN Agent is shutting down...");
-        if (scheduler != null && !scheduler.isShutdown()) {
-            scheduler.shutdownNow();
+        LOGGER.info("Auto-LAN Agent public shutdown called.");
+        shutdownInternal(true); // Default to releasing key on public shutdown
+
+        // Shutdown the agent's own executor
+        AGENT_EXECUTOR.shutdown();
+        try {
+            if (!AGENT_EXECUTOR.awaitTermination(5, TimeUnit.SECONDS)) {
+                AGENT_EXECUTOR.shutdownNow();
+                LOGGER.warn("Agent executor did not terminate in time.");
+            } else {
+                LOGGER.info("Agent executor shut down successfully.");
+            }
+        } catch (InterruptedException e) {
+            AGENT_EXECUTOR.shutdownNow();
+            LOGGER.warn("Interrupted while waiting for agent executor to terminate.");
+            Thread.currentThread().interrupt();
         }
-        
-        // Освобождаем временный ключ перед выходом, если он используется
-        if (ngrokKeyManager != null) {
-            ngrokKeyManager.releaseTemporaryKeyIfNeeded();
-        }
-        
-        // Корректно завершаем работу менеджера ключей
-        NgrokKeyManager.shutdown();
     }
-    
+
     /**
-     * Возвращает активный ключ ngrok для использования 
-     * при настройке туннеля.
-     * 
-     * @return активный ключ ngrok или пустая строка, если ключ не доступен
+     * Returns the active ngrok key. This should only be called after the init() CompletableFuture has completed successfully.
+     * @return The active ngrok key, or null if not initialized or key retrieval failed.
      */
     public String getNgrokKey() {
-        if (ngrokKeyManager != null) {
-            String key = ngrokKeyManager.getActiveKey();
-            return key != null ? key : "";
+        if (activeNgrokKey == null) {
+            LOGGER.warn("getNgrokKey() called but activeNgrokKey is null. Agent might not be initialized or key retrieval failed.");
         }
-        return "";
+        return activeNgrokKey;
+    }
+
+    public void setWorldActive(boolean active) {
+        this.worldActive = active;
+        LOGGER.info("AutoLanAgent world status set to: {}", active);
+        if (active && (heartbeatScheduler == null || heartbeatScheduler.isShutdown())) {
+             if (clientId != null && activeNgrokKey != null) {
+                LOGGER.info("World is active and prerequisites met, ensuring background tasks are running.");
+                startBackgroundTasks();
+             } else {
+                LOGGER.warn("World set to active, but agent may not be fully initialized (clientId or ngrokKey missing). Background tasks not started.");
+             }
+        } else if (!active && heartbeatScheduler != null && !heartbeatScheduler.isShutdown()) {
+            LOGGER.info("World is inactive, stopping background tasks (heartbeats).");
+            heartbeatScheduler.shutdownNow();
+            // It's better to re-create the scheduler in startBackgroundTasks if needed again
+        }
     }
     
     /**
@@ -160,20 +227,28 @@ public class AutoLanAgent {
     }
 
     private void scheduleRetryRegistration() {
-        if (scheduler != null && !scheduler.isShutdown()) {
+        if (heartbeatScheduler != null && !heartbeatScheduler.isShutdown()) {
             LOGGER.info("Scheduling registration retry in 60 seconds");
-            scheduler.schedule(this::performRegistration, 60, TimeUnit.SECONDS);
+            heartbeatScheduler.schedule(this::performRegistration, 60, TimeUnit.SECONDS);
         }
     }
 
     private void startBackgroundTasks() {
-        if (scheduler != null && !scheduler.isShutdown()) {
-            scheduler.shutdownNow();
+        if (heartbeatScheduler != null && !heartbeatScheduler.isShutdown()) {
+            // Ensure previous scheduler is properly shut down before creating a new one
+            heartbeatScheduler.shutdownNow();
+            try {
+                if (!heartbeatScheduler.awaitTermination(1, TimeUnit.SECONDS)) {
+                     LOGGER.warn("Previous heartbeat scheduler did not terminate quickly during restart.");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
         
-        scheduler = Executors.newScheduledThreadPool(2); // One for heartbeat, one for commands
-        scheduler.scheduleAtFixedRate(this::sendHeartbeat, 0, 10, TimeUnit.SECONDS);
-        scheduler.scheduleAtFixedRate(this::fetchAndExecuteCommands, 0, 5, TimeUnit.SECONDS);
+        heartbeatScheduler = Executors.newScheduledThreadPool(2); // One for heartbeat, one for commands
+        heartbeatScheduler.scheduleAtFixedRate(this::sendHeartbeat, 0, 10, TimeUnit.SECONDS);
+        heartbeatScheduler.scheduleAtFixedRate(this::fetchAndExecuteCommands, 0, 5, TimeUnit.SECONDS);
         
         LOGGER.info("Auto-LAN agent started with client ID: {}", org.wsm.autolan.util.SecurityUtil.maskSensitiveData(clientId));
     }
@@ -326,5 +401,30 @@ public class AutoLanAgent {
     public void updateTunnelUrl(String tunnelName, String tunnelUrl) {
         // This method is called when a new tunnel is established
         LOGGER.info("New tunnel established: {} -> {}", tunnelName, tunnelUrl);
+    }
+
+    /**
+     * Shuts down the agent's dedicated executor service.
+     * This should be called globally when the mod is shutting down.
+     */
+    public static void shutdownAgentExecutor() {
+        if (AGENT_EXECUTOR != null && !AGENT_EXECUTOR.isShutdown()) {
+            LOGGER.info("Shutting down AutoLanAgent AGENT_EXECUTOR...");
+            AGENT_EXECUTOR.shutdown();
+            try {
+                if (!AGENT_EXECUTOR.awaitTermination(5, TimeUnit.SECONDS)) {
+                    AGENT_EXECUTOR.shutdownNow();
+                    LOGGER.warn("AutoLanAgent AGENT_EXECUTOR did not terminate in time.");
+                } else {
+                    LOGGER.info("AutoLanAgent AGENT_EXECUTOR shut down successfully.");
+                }
+            } catch (InterruptedException e) {
+                AGENT_EXECUTOR.shutdownNow();
+                LOGGER.warn("Interrupted while waiting for AutoLanAgent AGENT_EXECUTOR to terminate.");
+                Thread.currentThread().interrupt();
+            }
+        } else {
+            LOGGER.info("AutoLanAgent AGENT_EXECUTOR is null or already shut down.");
+        }
     }
 } 
