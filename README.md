@@ -1,24 +1,43 @@
 # Auto-Lan
 ![Screenshot](docs/screen_en.png)
 ![Screenshot](docs/screen_cn.png)
-**Info:**
-* This mod's codes are inspired by [Custom-LAN](https://github.com/DimiDimit/Custom-LAN)
 
-**Functions:**
-* Customize more of your integrated server (Online Mode, Max Players, MOTD)
-* Use ampersands (`&`) for [formatting codes](https://minecraft.wiki/w/Formatting_codes) instead of section signs (`§`) and variables (e.g. `${username}`, `${world}`) in the MOTD
-* Change the settings mid-game (including the port) and stop the server without quitting the world
-* Save the settings globally or per-world (they are loaded automatically with per-world settings taking priority over the global ones, which take priority over the system defaults)
-* Change who can use cheats individually using the `/op` and `/deop` commands and cheat in singleplayer without opening to LAN (replaces the Allow Cheats button)
-* Manage bans with `/ban`, `/ban-ip`, `/banlist`, `/pardon` and `/pardon-ip`, and whitelist players with `/whitelist` (use `/whitelist on`/`off` to enable/disable)
-* Expose your server outside your LAN without port forwarding using tunnels (currently only ngrok is supported)
+## О проекте
+Auto-Lan - это мод для Minecraft, который значительно расширяет возможности встроенного LAN-сервера, делая его более функциональным и удобным для совместной игры. Код мода вдохновлен проектом [Custom-LAN](https://github.com/DimiDimit/Custom-LAN), но со значительными дополнениями и улучшениями.
 
-Commands:
-```
-/publish [port] [onlineMode] [maxPlayers] [defaultGameMode] [tunnel] [motd]
-/publish [perworld|global|system] [port] [onlineMode] [maxPlayers] [defaultGameMode] [tunnel] [motd]
-/publish stop
-```
-The global settings are stored in `.minecraft/config/autolan.toml`, while the per-world ones are stored in `data/autolan.dat` in the respective world's directory.
+## Основные функции
 
-The files used are also per-world and the same as on dedicated servers—`banned-players.json`, `banned-ips.json`, `whitelist.json`—though whether the whitelist is enabled is stored in `data/autolan.dat`.
+### Настройка встроенного сервера
+* Настройка различных параметров интегрированного сервера:
+  * Установленное максимальное количество игроков - 5
+  * Установка игрового режима по умолчанию
+* Использование амперсандов (`&`) для [кодов форматирования](https://minecraft.wiki/w/Formatting_codes) вместо знаков параграфа (`§`)
+* Поддержка переменных в MOTD (например, `${username}`, `${world}`) для динамического отображения информации
+
+### Управление сервером
+* Изменение настроек сервера в процессе игры без перезагрузки мира
+* Сохранение настроек глобально или индивидуально для каждого мира
+* Автоматическая загрузка сохраненных настроек при запуске мира
+* Остановка сервера без выхода из мира
+
+### Система туннелирования
+* Доступ к вашему серверу извне локальной сети без необходимости настройки проброса портов
+* Поддержка туннелирования через ngrok
+* Автоматическое управление ключами ngrok через Auto-LAN Agent
+
+## Хранение данных
+* Глобальные настройки хранятся в файле `.minecraft/config/autolan.toml`
+* Настройки для отдельных миров хранятся в `data/autolan.dat` в директории соответствующего мира
+
+## Настройка туннелирования ngrok
+Для использования функции туннелирования через ngrok:
+1. Зарегистрируйтесь на [сайте ngrok](https://dashboard.ngrok.com/)
+2. Получите ваш authtoken на странице [настроек](https://dashboard.ngrok.com/get-started/your-authtoken)
+3. При первом запуске туннеля система автоматически запросит ключ через Auto-LAN Agent
+
+## Требования
+* Minecraft с поддержкой Fabric
+* Fabric API
+
+## Лицензия
+Смотрите файл [LICENSE](LICENSE) для получения информации о лицензии.

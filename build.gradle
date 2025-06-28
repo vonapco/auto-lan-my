@@ -39,9 +39,10 @@ dependencies {
 		include(modImplementation(fabricApi.module(it, project.fabric_version)))
 	}
 
-	modApi("me.shedaniel.cloth:cloth-config-fabric:${project.cloth_config_version}") {
+	// Replace cloth-config dependency with included version to bundle it into final JAR
+	include(modApi("me.shedaniel.cloth:cloth-config-fabric:${project.cloth_config_version}") {
 		exclude(group: "net.fabricmc.fabric-api")
-	}
+	})
 	modImplementation "com.terraformersmc:modmenu:${project.modmenu_version}"
 
 	include(implementation("org.apache.commons:commons-text:${project.apache_commons_text_version}"))
@@ -81,12 +82,19 @@ jar {
 	from("LICENSE") {
 		rename { "${it}_${project.archivesBaseName}"}
 	}
+	// Не включаем вспомогательные утилиты обфускации в итоговый JAR
+	exclude 'org/wsm/autolan/tools/**'
 }
 
 // Переименовываем итоговый remapJar
 tasks.named("remapJar") {
 	archiveBaseName.set("autolan${project.minecraft_version}")
 	archiveVersion.set("")
+}
+
+// На всякий случай исключаем утилиты и из задач SourceJar/RemapSourcesJar
+tasks.withType(Jar).configureEach {
+	exclude 'org/wsm/autolan/tools/**'
 }
 
 // configure the maven publication
@@ -104,4 +112,13 @@ publishing {
 		// The repositories here will be used for publishing your artifact, not for
 		// retrieving dependencies.
 	}
+}
+
+// Добавляю в конец файла новую задачу Gradle для тестирования SecurityUtil
+task testSecurityUtil(type: JavaExec) {
+	description = 'Runs the SecurityUtil test class'
+	group = 'verification'
+	
+	classpath = sourceSets.main.runtimeClasspath
+	mainClass = 'org.wsm.autolan.tools.TestSecurityUtil'
 }

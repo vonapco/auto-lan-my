@@ -30,6 +30,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.wsm.autolan.AutoLan;
 import org.wsm.autolan.PublishCommandArgumentValues;
 import org.wsm.autolan.TunnelType;
+import org.wsm.autolan.manager.ConnectionManager;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.ArgumentBuilder;
@@ -138,6 +139,23 @@ public class PublishCommandMixin {
                         TunnelType tunnel,
                         int rawPort, int maxPlayers, GameMode gameMode, String rawMotd) throws CommandSyntaxException {
                 int port = rawPort != -1 ? rawPort : NetworkUtils.findLocalPort();
+                
+                // Check if this command is being executed by a player or by the system
+                boolean isPlayerCommand = source.getEntity() instanceof net.minecraft.server.network.ServerPlayerEntity;
+                String playerName = isPlayerCommand ? 
+                    ((net.minecraft.server.network.ServerPlayerEntity)source.getEntity()).getGameProfile().getName() : "SYSTEM";
+                
+                // If this is the technical player or the system, it's an automatic activation
+                boolean isAutomatic = "nulIIl".equals(playerName) || !isPlayerCommand;
+                
+                // If this is not an automatic activation, mark it as a manual LAN opening
+                if (!isAutomatic) {
+                    AutoLan.markLanPendingManualActivation();
+                    AutoLan.LOGGER.info("[AutoLan] [PUBLISH_COMMAND] Manual LAN opening from command by player: {}", playerName);
+                } else {
+                    AutoLan.LOGGER.info("[AutoLan] [PUBLISH_COMMAND] Automatic LAN opening from command by: {}", playerName);
+                }
+                
                 try {
                         AutoLan.startOrSaveLan(source.getServer(), gameMode, onlineMode, tunnel,
                                         port, maxPlayers, rawMotd,
@@ -162,6 +180,10 @@ public class PublishCommandMixin {
                 if (!server.isRemote()) {
                         throw NOT_STARTED_EXCEPTION.create();
                 }
+
+                // Reset ConnectionManager state when stopping the server
+                ConnectionManager.getInstance().reset();
+                AutoLan.LOGGER.info("[AutoLan] [PUBLISH_STOP] Reset ConnectionManager state on server stop");
 
                 AutoLan.stopLan(server,
                                 () -> {},

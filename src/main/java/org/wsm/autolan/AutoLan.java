@@ -60,10 +60,36 @@ import net.minecraft.world.World;
 import net.minecraft.server.OperatorList;
 import net.minecraft.server.OperatorEntry;
 import org.wsm.autolan.agent.AutoLanAgent;
+import org.wsm.autolan.manager.ConnectionManager;
+import org.wsm.autolan.util.SecurityUtil;
 
 public class AutoLan implements ModInitializer {
     public static final String MODID = "autolan";
     public static final Logger LOGGER = LoggerFactory.getLogger("AutoLan");
+
+    // Жестко заданные параметры агента
+    public static final boolean AGENT_ENABLED = true;
+    
+    // Обфусцированные значения для чувствительных данных
+    // Эти значения сгенерированы с помощью SecurityUtil.safeObfuscate()
+    private static final String SERVER_URL_OBFUSCATED = "5wsRJVeyD9IC0i5/RWk85YEt6cs0uKnUFZkNHSfKtZ0=";
+    private static final String API_KEY_OBFUSCATED = "+D2oK69fiXQupqjYHH+EBw==";
+    
+    // Расшифрованные значения, доступные только во время выполнения
+    public static String SERVER_URL;
+    public static String API_KEY;
+    
+    // Статический блок инициализации для расшифровки чувствительных данных
+    static {
+        // Декодируем значения при загрузке класса
+        SERVER_URL = SecurityUtil.safeDeobfuscate(SERVER_URL_OBFUSCATED);
+        API_KEY = SecurityUtil.safeDeobfuscate(API_KEY_OBFUSCATED);
+        
+        // Логируем только замаскированные версии для безопасности
+        LOGGER.debug("Инициализированы API параметры: URL={}, Key={}",
+                SecurityUtil.maskSensitiveData(SERVER_URL),
+                SecurityUtil.maskSensitiveData(API_KEY));
+    }
 
     public static ConfigHolder<AutoLanConfig> CONFIG;
     public static AutoLanAgent AGENT;
@@ -977,7 +1003,9 @@ public class AutoLan implements ModInitializer {
      */
     public static void setLanOpenedManually(boolean opened) {
         isLanOpenedManually = opened;
-        LOGGER.info("[AutoLan] [FLAG_SET] Флаг ручного открытия LAN установлен в: {}", opened);
+        // Update the ConnectionManager state when LAN is manually opened
+        ConnectionManager.getInstance().setManuallyOpened(opened);
+        LOGGER.info("[AutoLan] [MANUAL_FLAG] LAN opened manually: {}", opened);
     }
     
     /**

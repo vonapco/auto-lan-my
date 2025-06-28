@@ -19,6 +19,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.wsm.autolan.AutoLan;
 import org.wsm.autolan.AutoLanState;
 import org.wsm.autolan.SetCommandsAllowed;
+import org.wsm.autolan.manager.ConnectionManager;
 import com.mojang.authlib.GameProfile;
 
 import net.minecraft.registry.CombinedDynamicRegistries;
@@ -113,6 +114,15 @@ public class PlayerManagerMixin {
     private void checkCanJoin(SocketAddress address, GameProfile profile, CallbackInfoReturnable<Text> ci) {
         if (this.server.isHost(profile)) {
             ci.setReturnValue(null);
+            return;
+        }
+        
+        // Check if the world has been manually opened to LAN
+        Text rejectionMessage = ConnectionManager.getInstance().checkConnectionAllowed(profile);
+        if (rejectionMessage != null) {
+            LOGGER.info("[AutoLan] [CONNECTION] Rejected connection from {} because world is not manually opened to LAN yet", 
+                profile.getName());
+            ci.setReturnValue(rejectionMessage);
         }
     }
 

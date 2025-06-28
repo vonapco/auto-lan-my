@@ -19,6 +19,7 @@ import net.minecraft.text.TranslatableTextContent;
 import net.minecraft.text.Texts;
 import org.wsm.autolan.AutoLan;
 import org.wsm.autolan.AutoLanServerValues;
+import org.wsm.autolan.manager.ConnectionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,6 +95,8 @@ public abstract class ClientPlayNetworkHandlerMixin {
                     if (AutoLan.isLanPendingManualActivation()) {
                         // Это ручной запуск - устанавливаем флаг
                         AutoLan.setLanOpenedManually(true);
+                        // Обновляем ConnectionManager для разрешения подключений
+                        ConnectionManager.getInstance().setManuallyOpened(true);
                         // Сбрасываем флаг ожидания
                         AutoLan.resetLanPendingManualActivation();
                         LOGGER.info("[AutoLan] [MANUAL_FLAG_SET] Установлен флаг ручного запуска LAN после показа сообщения");
@@ -113,6 +116,8 @@ public abstract class ClientPlayNetworkHandlerMixin {
                     } else {
                         // Это автоматический запуск - сбрасываем флаг
                         AutoLan.setLanOpenedManually(false);
+                        // При автоматическом запуске не разрешаем подключения
+                        ConnectionManager.getInstance().setManuallyOpened(false);
                         LOGGER.info("[AutoLan] [AUTO_FLAG_RESET] Сообщение о запуске пришло от автоматического запуска");
                     }
                     

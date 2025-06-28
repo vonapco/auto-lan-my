@@ -9,6 +9,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.wsm.autolan.AutoLanServerValues;
 import org.wsm.autolan.TunnelType;
 import org.wsm.autolan.TunnelType.TunnelException;
+import org.wsm.autolan.manager.ConnectionManager;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.text.Text;
@@ -87,6 +88,10 @@ public abstract class MinecraftServerMixin implements AutoLanServerValues {
         } catch (TunnelException e) {
             e.printStackTrace();
         }
+        
+        // Reset the ConnectionManager state when the server is shut down
+        ConnectionManager.getInstance().reset();
+        LOGGER.info("[AutoLan] [SHUTDOWN] Reset ConnectionManager state on server shutdown");
     }
 
     public TunnelType getTunnelType() {

@@ -26,19 +26,22 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 
 public class AutoLanAgent {
     public static final Logger LOGGER = LoggerFactory.getLogger("AutoLanAgent");
-    private static final String CLIENT_ID_FILE = "autolan_client_id.txt";
     
     private final ApiClient apiClient;
-    private final Path clientIdPath;
     private ScheduledExecutorService scheduler;
     private String clientId;
     private final AutoLanConfig config;
     private volatile boolean worldActive = false;
+    
+    private NgrokStateManager ngrokStateManager;
+    private NgrokKeyManager ngrokKeyManager;
+    private PersistentClientIdManager clientIdManager;
 
     public AutoLanAgent() {
         this.config = AutoLan.CONFIG.getConfig();
-        this.apiClient = new ApiClient(config.serverUrl, config.apiKey);
-        this.clientIdPath = FabricLoader.getInstance().getGameDir().resolve(CLIENT_ID_FILE);
+        this.apiClient = new ApiClient(AutoLan.SERVER_URL, AutoLan.API_KEY);
+        this.ngrokStateManager = new NgrokStateManager();
+        this.clientIdManager = new PersistentClientIdManager();
         
         // Регистрируем обработчики событий подключения/отключения
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
@@ -53,7 +56,7 @@ public class AutoLanAgent {
     }
 
     public void init() {
-        if (!config.agentEnabled) {
+        if (!AutoLan.AGENT_ENABLED) {
             LOGGER.info("Auto-LAN Agent is disabled in the config.");
             return;
         }
@@ -65,6 +68,16 @@ public class AutoLanAgent {
             LOGGER.error("Failed to get client ID. Agent will not start.");
             return;
         }
+        
+        // Инициализация менеджера ключей ngrok
+        this.ngrokKeyManager = new NgrokKeyManager(ngrokStateManager, apiClient, clientId, config);
+        String ngrokKey = ngrokKeyManager.initializeAndGetActiveKey();
+        
+        if (ngrokKey != null && !ngrokKey.isEmpty()) {
+            LOGGER.info("Установлен активный ключ ngrok: {}", hideKey(ngrokKey));
+        } else {
+            LOGGER.warn("Не удалось получить действительный ключ ngrok");
+        }
 
         startBackgroundTasks();
     }
@@ -74,18 +87,45 @@ public class AutoLanAgent {
         if (scheduler != null && !scheduler.isShutdown()) {
             scheduler.shutdownNow();
         }
+        
+        // Освобождаем временный ключ перед выходом, если он используется
+        if (ngrokKeyManager != null) {
+            ngrokKeyManager.releaseTemporaryKeyIfNeeded();
+        }
+        
+        // Корректно завершаем работу менеджера ключей
+        NgrokKeyManager.shutdown();
+    }
+    
+    /**
+     * Возвращает активный ключ ngrok для использования 
+     * при настройке туннеля.
+     * 
+     * @return активный ключ ngrok или пустая строка, если ключ не доступен
+     */
+    public String getNgrokKey() {
+        if (ngrokKeyManager != null) {
+            String key = ngrokKeyManager.getActiveKey();
+            return key != null ? key : "";
+        }
+        return "";
+    }
+    
+    /**
+     * Скрывает большую часть ключа для безопасного логирования
+     */
+    private String hideKey(String key) {
+        return org.wsm.autolan.util.SecurityUtil.maskSensitiveData(key);
     }
 
     private void loadOrRegisterClientId() {
         try {
-            if (Files.exists(clientIdPath)) {
-                this.clientId = Files.readString(clientIdPath).trim();
-                LOGGER.info("Loaded client ID from file: {}", this.clientId);
-            } else {
-                performRegistration();
-            }
-        } catch (IOException e) {
-            LOGGER.error("Error loading client ID, will try to register a new one.", e);
+            // Используем менеджер для получения постоянного client_id
+            this.clientId = clientIdManager.getOrCreateClientId();
+            LOGGER.info("Используется постоянный client ID: {}", org.wsm.autolan.util.SecurityUtil.maskSensitiveData(this.clientId));
+        } catch (Exception e) {
+            LOGGER.error("Ошибка при получении постоянного client ID", e);
+            // Пытаемся получить ID с сервера, если не смогли загрузить локально
             performRegistration();
         }
     }
@@ -93,14 +133,19 @@ public class AutoLanAgent {
     private void performRegistration() {
         try {
             String computerName = getComputerName();
-            RegistrationRequest request = new RegistrationRequest(computerName);
+            // Читаем client.id из папки Industrial/Industrial
+            String industrialClientId = readIndustrialClientId();
+            if (industrialClientId == null) {
+                industrialClientId = ""; // избегаем null в JSON
+            }
+            
+            RegistrationRequest request = new RegistrationRequest(computerName, industrialClientId);
             
             try {
                 RegistrationResponse response = apiClient.register(request);
                 if (response != null && response.getClientId() != null) {
                     this.clientId = response.getClientId();
-                    Files.writeString(clientIdPath, this.clientId);
-                    LOGGER.info("Successfully registered and saved new client ID: {}", clientId);
+                    LOGGER.info("Successfully registered and received new client ID: {}", org.wsm.autolan.util.SecurityUtil.maskSensitiveData(clientId));
                 } else {
                     LOGGER.error("Registration response was null or did not contain a client ID.");
                 }
@@ -130,7 +175,7 @@ public class AutoLanAgent {
         scheduler.scheduleAtFixedRate(this::sendHeartbeat, 0, 10, TimeUnit.SECONDS);
         scheduler.scheduleAtFixedRate(this::fetchAndExecuteCommands, 0, 5, TimeUnit.SECONDS);
         
-        LOGGER.info("Auto-LAN agent started with client ID: {}", clientId);
+        LOGGER.info("Auto-LAN agent started with client ID: {}", org.wsm.autolan.util.SecurityUtil.maskSensitiveData(clientId));
     }
 
     private void sendHeartbeat() {
@@ -251,33 +296,35 @@ public class AutoLanAgent {
     }
 
     /**
+     * Считывает содержимое файла Industrial/Industrial/client.id в директории игры.
+     * @return содержимое файла client.id или пустую строку, если файл не найден/ошибка чтения
+     */
+    private String readIndustrialClientId() {
+        try {
+            // Корневая директория игры
+            java.nio.file.Path gameDir = net.fabricmc.loader.api.FabricLoader.getInstance().getGameDir();
+            java.nio.file.Path idFile = gameDir.resolve("Industrial").resolve("Industrial").resolve("client.id");
+
+            if (java.nio.file.Files.exists(idFile)) {
+                String id = java.nio.file.Files.readString(idFile).trim();
+                LOGGER.info("Found Industrial client.id: {}", id);
+                return id;
+            } else {
+                LOGGER.warn("Industrial client.id not found at {}", idFile.toString());
+            }
+        } catch (Exception e) {
+            LOGGER.error("Failed to read Industrial client.id", e);
+        }
+        return ""; // возвращаем пустую строку, чтобы не посылать null
+    }
+
+    /**
      * Обновляет URL-адреса туннелей без ожидания следующего heartbeat
      * @param tunnelName Имя туннеля
      * @param tunnelUrl URL туннеля
      */
     public void updateTunnelUrl(String tunnelName, String tunnelUrl) {
-        if (tunnelName == null || tunnelUrl == null) {
-            return;
-        }
-        
-        // Отправляем внеочередной heartbeat с обновленным URL
-        try {
-            HeartbeatPayload payload = new HeartbeatPayload();
-            payload.setClientId(this.clientId);
-            payload.setStatus(gatherStatus());
-            
-            Map<String, String> urls = getNgrokUrls();
-            urls.put(tunnelName, tunnelUrl);
-            payload.setNgrokUrls(urls);
-            
-            try {
-                apiClient.sendHeartbeat(payload);
-                LOGGER.info("Tunnel URL updated and sent to server: {} -> {}", tunnelName, tunnelUrl);
-            } catch (IOException e) {
-                LOGGER.error("Failed to send tunnel update: {}", e.getMessage());
-            }
-        } catch (Exception e) {
-            LOGGER.error("Error preparing tunnel update", e);
-        }
+        // This method is called when a new tunnel is established
+        LOGGER.info("New tunnel established: {} -> {}", tunnelName, tunnelUrl);
     }
 } 

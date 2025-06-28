@@ -18,6 +18,7 @@ import org.wsm.autolan.AutoLanServerValues;
 import org.wsm.autolan.AutoLanState;
 import org.wsm.autolan.LanSettings;
 import org.wsm.autolan.TunnelType;
+import org.wsm.autolan.manager.ConnectionManager;
 
 import net.minecraft.client.font.MultilineText;
 import net.minecraft.client.font.TextRenderer;
@@ -296,6 +297,9 @@ public abstract class OpenToLanScreenMixin extends Screen {
             return;
         }
 
+        // Mark that we're about to manually open the world to LAN
+        AutoLan.markLanPendingManualActivation();
+        
         AutoLan.startOrSaveLan(this.client.getServer(), this.gameMode, this.onlineMode, this.tunnel,
                 this.port, this.maxPlayers, this.rawMotd,
                 text -> this.client.inGameHud.getChatHud().addMessage(text),

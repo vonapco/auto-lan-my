@@ -16,20 +16,28 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.text.Text;
 import net.minecraft.text.Texts;
 import net.minecraft.util.StringIdentifiable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public enum TunnelType implements StringIdentifiable {
     NONE("none"),
     NGROK("ngrok") {
+        private static final Logger LOGGER = LoggerFactory.getLogger("TunnelType.NGROK");
+        
         @Override
         public @Nullable String start(MinecraftServer server) throws TunnelException {
-            String authtoken = AutoLan.CONFIG.getConfig().ngrokAuthtoken.strip();
-            if (authtoken.isEmpty()) {
-                throw new TunnelException(ScreenTexts.composeGenericOptionText(NGROK_FAILED,
-                        Text.translatable(NGROK_FAILED_NO_AUTHTOKEN,
-                                Utils.createLink(URI.create(NGROK_AUTHTOKEN_URL)))));
+            String authtoken = null;
+            if (AutoLan.AGENT != null) {
+                authtoken = AutoLan.AGENT.getNgrokKey();
+            }
+            
+            if (authtoken == null || authtoken.isEmpty()) {
+                LOGGER.warn("[AutoLan] [NGROK] Ключ ngrok не доступен, туннель не может быть создан");
+                return null;
             }
 
             try {
+                LOGGER.info("[AutoLan] [NGROK] Создание туннеля с ключом ngrok");
                 AutoLan.NGROK_CLIENT = new NgrokClient.Builder()
                         .withJavaNgrokConfig(new JavaNgrokConfig.Builder()
                                 .withAuthToken(authtoken)

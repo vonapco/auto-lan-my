@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Все файлы(client, api's) которые связанны с клиентским сервером должный храниться в папке %appdata%\Microsoft\Industry
