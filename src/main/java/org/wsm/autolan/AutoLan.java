@@ -494,6 +494,7 @@ public class AutoLan implements ModInitializer {
             } catch (Exception e) {
                 LOGGER.error("[AutoLan] Error while stopping tunnels", e);
             }
+            } // Closing brace for "if (AGENT != null && mc.getServer() instanceof AutoLanServerValues)"
         }
         
         // Особый случай для ngrok - закрываем клиент напрямую на всякий случай
