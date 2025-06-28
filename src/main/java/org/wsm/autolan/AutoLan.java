@@ -10,14 +10,17 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.concurrent.CompletableFuture; // Added for CompletableFuture
 import java.util.concurrent.ConcurrentHashMap;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.command.v2.ArgumentTypeRegistry;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents; // Added for SERVER_STOPPING
 import org.apache.commons.text.StringSubstitutor;
 import org.jetbrains.annotations.Nullable;
 
 import org.wsm.autolan.TunnelType.TunnelException;
+import org.wsm.autolan.agent.NgrokKeyManager; // Added for NgrokKeyManager.shutdown()
 import org.wsm.autolan.command.argument.TunnelArgumentType;
 import org.wsm.autolan.mixin.IntegratedServerAccessor;
 import org.wsm.autolan.mixin.PlayerManagerAccessor;
@@ -420,96 +423,185 @@ public class AutoLan implements ModInitializer {
         ArgumentTypeRegistry.registerArgumentType(Identifier.of(MODID, "tunnel"), TunnelArgumentType.class,
                 ConstantArgumentSerializer.of(TunnelArgumentType::tunnel));
 
-        // Регистрация события входа в мир
+        // --- New Event Handling Logic ---
+
+        // Server Start Event (Integrated Server Ready)
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            LOGGER.info("[AutoLan] [WORLD_JOIN] Игрок вошел в мир");
-            
             MinecraftClient mc = MinecraftClient.getInstance();
-            mc.execute(() -> {
-                if (mc.isIntegratedServerRunning() && mc.getServer() != null) {
-                    // Инициализируем агент только при входе в интегрированный сервер
-                    if (AutoLan.AGENT == null && AutoLan.AGENT_ENABLED) {
-                        LOGGER.info("[AutoLan] Initializing AutoLanAgent for Integrated Server...");
-                        AutoLan.AGENT = new AutoLanAgent();
-                        AutoLan.AGENT.init();
-                    }
-                    // Продолжаем с публикацией сервера
-                    mc.getServer().getCommandManager().executeWithPrefix(mc.getServer().getCommandSource(), "publish");
-                }
-            });
+            // Эта проверка должна быть здесь, чтобы onIntegratedServerReady вызывался только один раз
+            // когда интегрированный сервер действительно готов и доступен через client.getServer().
+            if (mc.isIntegratedServerRunning() && mc.getServer() != null) {
+                LOGGER.info("[AutoLan] ClientPlayConnectionEvents.JOIN: Integrated server detected.");
+                // Передаем управление методу onIntegratedServerReady
+                // mc.execute() не нужен здесь, так как onIntegratedServerReady будет управлять потоками
+                onIntegratedServerReady(mc.getServer());
+            } else {
+                LOGGER.info("[AutoLan] ClientPlayConnectionEvents.JOIN: Not an integrated server or server is null. No action taken.");
+            }
         });
 
-        // Регистрация события отключения от сервера/мира
+        // Server Stop Event
+        ServerLifecycleEvents.SERVER_STOPPING.register(AutoLan::onServerStopping);
+
+        // Client Disconnect Event (from any server)
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-            // Сбрасываем все флаги при выходе из мира
-            LOGGER.info("[AutoLan] [WORLD_EXIT] Игрок покинул мир. Сброс всех флагов состояния LAN.");
+            LOGGER.info("[AutoLan] ClientPlayConnectionEvents.DISCONNECT: Player disconnected from a server.");
+            // Если агент был активен (т.е. это был наш интегрированный сервер), деактивируем его.
+            if (AGENT != null) {
+                LOGGER.info("[AutoLan] Setting AutoLanAgent world state to inactive due to client disconnect.");
+                AGENT.setWorldActive(false);
+                // Не останавливаем туннели и не выключаем агент полностью здесь,
+                // это должно произойти при ServerLifecycleEvents.SERVER_STOPPING.
+            }
+            // Сброс пользовательских настроек LAN при выходе из любого мира/сервера.
             resetUserLanSettings();
-            
-            // Останавливаем туннель при выходе из мира
-            stopTunnels();
+            LOGGER.info("[AutoLan] User LAN settings reset on disconnect.");
         });
         
-        // Добавляем хук для остановки агента при завершении игры
+        // Shutdown Hook - Fallback for ensuring resources are cleaned up
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            // Останавливаем туннели
-            stopTunnels();
-            
-            // Останавливаем агент
-            if (AGENT != null) {
-                LOGGER.info("[AutoLan] Shutting down agent on game exit");
-                AGENT.shutdown();
-            } else {
-                LOGGER.info("[AutoLan] Agent was not initialized, no shutdown needed.");
-            }
+            LOGGER.info("[AutoLan] JVM Shutdown Hook initiated.");
+            // Вызываем onServerStopping с null, так как сервер может быть уже недоступен.
+            // onServerStopping должен быть готов к этому.
+            onServerStopping(null);
+            // Дополнительно убеждаемся, что статические менеджеры executor'ов выключены.
+            // Эти вызовы должны быть идемпотентны.
+            AutoLanAgent.shutdownAgentExecutor(); // Статический метод для остановки AGENT_EXECUTOR
+            NgrokKeyManager.shutdown(); // Статический метод для остановки KEY_RETRIEVAL_EXECUTOR
+            LOGGER.info("[AutoLan] JVM Shutdown Hook completed.");
         }));
-        
-        LOGGER.info("[AutoLan] Mod loaded!");
+
+        LOGGER.info("[AutoLan] Mod loaded and event handlers registered!");
     }
 
     /**
-     * Останавливает все активные туннели
+     * Called when an integrated server is ready (player has joined their single-player world).
+     * Responsible for initializing the AutoLanAgent and starting the LAN publishing process.
      */
-    private static void stopTunnels() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.getServer() != null) {
-            // Дополнительно проверяем, что AGENT не null, т.к. туннели связаны с агентом
-            // Хотя stopTunnels() вызывается из ClientPlayConnectionEvents.DISCONNECT,
-            // где агент уже мог быть инициализирован, или из shutdown hook, где он проверяется.
-            // Эта проверка здесь для дополнительной безопасности, если stopTunnels будет вызван из другого места.
-            if (AGENT != null && mc.getServer() instanceof AutoLanServerValues) {
+    private static void onIntegratedServerReady(MinecraftServer server) {
+        LOGGER.info("[AutoLan] onIntegratedServerReady: Preparing to initialize AutoLanAgent and publish LAN.");
+
+        if (!AGENT_ENABLED) {
+            LOGGER.info("[AutoLan] AutoLan AGENT is disabled via AGENT_ENABLED=false. No action will be taken.");
+            return;
+        }
+
+        if (AGENT != null) {
+            LOGGER.warn("[AutoLan] onIntegratedServerReady called, but AGENT already exists. This might indicate a previous unclean shutdown or multiple join events. Attempting to reuse existing agent.");
+            // Если агент уже существует, возможно, просто активируем его и пытаемся опубликовать.
+            // Однако, это состояние не должно возникать при правильной логике SERVER_STOPPING.
+             AGENT.setWorldActive(true);
+            // Повторная публикация, если сервер уже был запущен, может быть не нужна или должна управляться иначе.
+            // Для простоты, пока вызываем publish.
+            server.getCommandManager().executeWithPrefix(server.getCommandSource(), "publish");
+            return;
+        }
+
+        LOGGER.info("[AutoLan] Creating new AutoLanAgent instance.");
+        AGENT = new AutoLanAgent();
+        AGENT.init().thenRunAsync(() -> {
+            LOGGER.info("[AutoLan] AutoLanAgent initialized successfully via CompletableFuture.");
+            if (AGENT != null) { // Перепроверка на случай, если AGENT был обнулен в exceptionally
+                AGENT.setWorldActive(true);
+                LOGGER.info("[AutoLan] AutoLanAgent world status set to active.");
+                LOGGER.info("[AutoLan] Executing /publish command on server thread.");
+                server.getCommandManager().executeWithPrefix(server.getCommandSource(), "publish");
+            } else {
+                 LOGGER.error("[AutoLan] AGENT became null after successful init chain. Publish command skipped.");
+            }
+        }, server) // server::execute shorthand for running on server thread
+        .exceptionally(ex -> {
+            LOGGER.error("[AutoLan] Failed to initialize AutoLanAgent or publish LAN.", ex);
+            if (AGENT != null) {
+                AGENT.shutdown(); // Попытка очистить ресурсы агента
+                AGENT = null;
+            }
+            // Можно добавить сообщение для игрока здесь, если это уместно
+            // server.getPlayerManager().broadcast(Text.literal("AutoLan failed to start: " + ex.getMessage()), false);
+            return null;
+        });
+    }
+
+    /**
+     * Called when a Minecraft server (specifically our integrated server) is stopping.
+     * Responsible for shutting down the AutoLanAgent, stopping tunnels, and cleaning up resources.
+     * @param server The server instance that is stopping. Can be null if called from shutdown hook late.
+     */
+    private static void onServerStopping(@Nullable MinecraftServer server) {
+        LOGGER.info("[AutoLan] onServerStopping: Server is stopping. Cleaning up AutoLan resources.");
+
+        if (AGENT != null) {
+            LOGGER.info("[AutoLan] Shutting down AutoLanAgent...");
+            AGENT.setWorldActive(false); // Signal agent to stop activities like heartbeats
+            AGENT.shutdown();           // Perform agent-specific cleanup (e.g., release ngrok key)
+            AGENT = null;
+            LOGGER.info("[AutoLan] AutoLanAgent shut down and instance set to null.");
+        } else {
+            LOGGER.info("[AutoLan] AutoLanAgent was already null. No agent shutdown needed.");
+        }
+
+        // Stop tunnels, passing the server instance if available
+        // stopTunnels now takes server argument
+        stopTunnels(server);
+
+        // Shutdown static executors. These calls should be safe even if already shutdown.
+        LOGGER.info("[AutoLan] Shutting down static executors for AutoLanAgent and NgrokKeyManager.");
+        AutoLanAgent.shutdownAgentExecutor(); // Ensure this static method exists in AutoLanAgent
+        NgrokKeyManager.shutdown();           // Ensure this static method exists in NgrokKeyManager
+        
+        activeTunnels.clear(); // Очищаем список активных туннелей в любом случае
+        LOGGER.info("[AutoLan] Active tunnels map cleared.");
+        LOGGER.info("[AutoLan] Cleanup on server stop completed.");
+    }
+
+
+    /**
+     * Останавливает все активные туннели.
+     * @param server The MinecraftServer instance, can be null if called from a context where server is not available.
+     */
+    private static void stopTunnels(@Nullable MinecraftServer server) {
+        LOGGER.info("[AutoLan] Attempting to stop tunnels...");
+        if (server != null && server instanceof AutoLanServerValues) {
+            AutoLanServerValues serverValues = (AutoLanServerValues) server;
+            TunnelType tunnelType = serverValues.getTunnelType();
+
+            if (tunnelType != null && tunnelType != TunnelType.NONE) {
+                LOGGER.info("[AutoLan] Stopping tunnel type: {}", tunnelType);
                 try {
-                    AutoLanServerValues serverValues = (AutoLanServerValues) mc.getServer();
-                TunnelType tunnelType = serverValues.getTunnelType();
-                
-                if (tunnelType != null && tunnelType != TunnelType.NONE) {
-                    LOGGER.info("[AutoLan] Stopping tunnels on world exit");
-                    try {
-                        tunnelType.stop(mc.getServer());
-                        serverValues.setTunnelType(TunnelType.NONE);
-                        serverValues.setTunnelText(null);
-                    } catch (TunnelType.TunnelException e) {
-                        LOGGER.error("[AutoLan] Error stopping tunnel", e);
-                    }
+                    tunnelType.stop(server); // tunnelType.stop() should handle ngrok process killing
+                    serverValues.setTunnelType(TunnelType.NONE);
+                    serverValues.setTunnelText(null);
+                    LOGGER.info("[AutoLan] Tunnel type {} stopped successfully.", tunnelType);
+                } catch (TunnelType.TunnelException e) {
+                    LOGGER.error("[AutoLan] Error stopping tunnel type {}:", tunnelType, e);
                 }
-            } catch (Exception e) {
-                LOGGER.error("[AutoLan] Error while stopping tunnels", e);
+            } else {
+                LOGGER.info("[AutoLan] No active tunnel type or server not AutoLanServerValues. Skipping specific tunnel stop.");
             }
-            } // Closing brace for "if (AGENT != null && mc.getServer() instanceof AutoLanServerValues)"
+        } else {
+             LOGGER.warn("[AutoLan] Cannot stop tunnels: Server is null or not an instance of AutoLanServerValues.");
         }
         
-        // Особый случай для ngrok - закрываем клиент напрямую на всякий случай
+        // Fallback: Пытаемся убить ngrok клиент напрямую, если он существует.
+        // Это особенно важно, если tunnelType.stop() не справился или сервер был null.
         if (NGROK_CLIENT != null) {
+            LOGGER.info("[AutoLan] Attempting to kill NGROK_CLIENT directly as a fallback.");
             try {
-                LOGGER.info("[AutoLan] Killing ngrok client directly");
                 NGROK_CLIENT.kill();
-                NGROK_CLIENT = null;
+                LOGGER.info("[AutoLan] NGROK_CLIENT killed successfully.");
             } catch (Exception e) {
-                LOGGER.error("[AutoLan] Failed to kill ngrok client", e);
+                LOGGER.error("[AutoLan] Failed to kill NGROK_CLIENT directly:", e);
+            } finally {
+                NGROK_CLIENT = null; // Обнуляем в любом случае
             }
         }
         
-        // Очищаем список активных туннелей
-        activeTunnels.clear();
+        // Очищаем список активных туннелей, если он не был очищен ранее
+        if (!activeTunnels.isEmpty()) {
+            activeTunnels.clear();
+            LOGGER.info("[AutoLan] Active tunnels map cleared in stopTunnels.");
+        }
+        LOGGER.info("[AutoLan] Tunnel stopping process completed.");
     }
 
     /**
