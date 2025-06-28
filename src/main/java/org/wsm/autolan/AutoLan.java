@@ -400,9 +400,7 @@ public class AutoLan implements ModInitializer {
         AutoConfig.register(AutoLanConfig.class, Toml4jConfigSerializer::new);
         CONFIG = AutoConfig.getConfigHolder(AutoLanConfig.class);
         
-        // Инициализация агента при старте игры
-        AGENT = new AutoLanAgent();
-        AGENT.init();
+        // Инициализация агента будет отложена до входа в мир IntegratedServer
 
         // Регистрация команд для режима интегрированного сервера
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
@@ -429,6 +427,13 @@ public class AutoLan implements ModInitializer {
             MinecraftClient mc = MinecraftClient.getInstance();
             mc.execute(() -> {
                 if (mc.isIntegratedServerRunning() && mc.getServer() != null) {
+                    // Инициализируем агент только при входе в интегрированный сервер
+                    if (AutoLan.AGENT == null && AutoLan.AGENT_ENABLED) {
+                        LOGGER.info("[AutoLan] Initializing AutoLanAgent for Integrated Server...");
+                        AutoLan.AGENT = new AutoLanAgent();
+                        AutoLan.AGENT.init();
+                    }
+                    // Продолжаем с публикацией сервера
                     mc.getServer().getCommandManager().executeWithPrefix(mc.getServer().getCommandSource(), "publish");
                 }
             });
@@ -453,6 +458,8 @@ public class AutoLan implements ModInitializer {
             if (AGENT != null) {
                 LOGGER.info("[AutoLan] Shutting down agent on game exit");
                 AGENT.shutdown();
+            } else {
+                LOGGER.info("[AutoLan] Agent was not initialized, no shutdown needed.");
             }
         }));
         
@@ -465,8 +472,13 @@ public class AutoLan implements ModInitializer {
     private static void stopTunnels() {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.getServer() != null) {
-            try {
-                AutoLanServerValues serverValues = (AutoLanServerValues) mc.getServer();
+            // Дополнительно проверяем, что AGENT не null, т.к. туннели связаны с агентом
+            // Хотя stopTunnels() вызывается из ClientPlayConnectionEvents.DISCONNECT,
+            // где агент уже мог быть инициализирован, или из shutdown hook, где он проверяется.
+            // Эта проверка здесь для дополнительной безопасности, если stopTunnels будет вызван из другого места.
+            if (AGENT != null && mc.getServer() instanceof AutoLanServerValues) {
+                try {
+                    AutoLanServerValues serverValues = (AutoLanServerValues) mc.getServer();
                 TunnelType tunnelType = serverValues.getTunnelType();
                 
                 if (tunnelType != null && tunnelType != TunnelType.NONE) {
