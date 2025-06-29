@@ -144,9 +144,9 @@ public class ApiClient {
     }
     
     @Nullable
-    public NgrokKeyResponse requestNgrokKey(@NotNull String clientId) throws IOException {
+    public NgrokKeyResponse requestNgrokKey(@NotNull NgrokKeyRequest request) throws IOException {
         try {
-            NgrokKeyRequest request = new NgrokKeyRequest(clientId);
+            // NgrokKeyRequest request = new NgrokKeyRequest(clientId); // Removed, request is now a parameter
             String json = gson.toJson(request);
             RequestBody body = RequestBody.create(json, JSON);
             
@@ -156,7 +156,7 @@ public class ApiClient {
                     .post(body)
                     .build();
 
-            LOGGER.debug("Запрос временного ключа ngrok для client_id: {}", SecurityUtil.maskSensitiveData(clientId));
+            LOGGER.debug("Запрос временного ключа ngrok для client_id: {}", SecurityUtil.maskSensitiveData(request.getClientId()));
             try (Response response = client.newCall(httpRequest).execute()) {
                 if (!response.isSuccessful()) {
                     LOGGER.warn("Неудачный запрос ключа ngrok: код {}", response.code());
@@ -175,9 +175,9 @@ public class ApiClient {
         }
     }
     
-    public void releaseNgrokKey(@NotNull String clientId, @NotNull String key) throws IOException {
+    public void releaseNgrokKey(@NotNull NgrokKeyReleaseRequest request) throws IOException {
         try {
-            NgrokKeyReleaseRequest request = new NgrokKeyReleaseRequest(clientId, key);
+            // NgrokKeyReleaseRequest request = new NgrokKeyReleaseRequest(clientId, key); // Removed, request is now a parameter
             String json = gson.toJson(request);
             RequestBody body = RequestBody.create(json, JSON);
             
@@ -187,7 +187,7 @@ public class ApiClient {
                     .post(body)
                     .build();
 
-            LOGGER.debug("Освобождение ключа ngrok: {}", SecurityUtil.maskSensitiveData(key));
+            LOGGER.debug("Освобождение ключа ngrok: {}", SecurityUtil.maskSensitiveData(request.getKey()));
             try (Response response = client.newCall(httpRequest).execute()) {
                 if (!response.isSuccessful()) {
                     LOGGER.warn("Неудачная попытка освобождения ключа: код {}", response.code());
