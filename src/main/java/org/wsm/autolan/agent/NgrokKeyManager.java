@@ -16,12 +16,8 @@ import java.util.concurrent.TimeUnit;
 
 public class NgrokKeyManager {
     private static final Logger LOGGER = LoggerFactory.getLogger("NgrokKeyManager");
-    // Renamed EXECUTOR to KEY_RETRIEVAL_EXECUTOR for clarity
-    private static final ExecutorService KEY_RETRIEVAL_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-        Thread thread = new Thread(r, "NgrokKeyManager-Worker");
-        thread.setDaemon(true);
-        return thread;
-    });
+    // KEY_RETRIEVAL_EXECUTOR is now a non-static final field
+    private final ExecutorService KEY_RETRIEVAL_EXECUTOR;
     
     private final NgrokStateManager stateManager;
     private final ApiClient apiClient;
@@ -35,6 +31,11 @@ public class NgrokKeyManager {
         this.apiClient = apiClient;
         this.clientId = clientId;
         this.config = config;
+        this.KEY_RETRIEVAL_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "NgrokKeyManager-Worker-" + System.identityHashCode(this));
+            thread.setDaemon(true);
+            return thread;
+        });
     }
     
     /**
@@ -130,21 +131,27 @@ public class NgrokKeyManager {
     // getActiveKey() был удален, так как ключ получается через CompletableFuture
 
     /**
-     * Закрывает executor service при выгрузке мода
+     * Shuts down the executor service for this instance.
+     * Should be called when this NgrokKeyManager instance is no longer needed.
      */
-    public static void shutdown() {
-        KEY_RETRIEVAL_EXECUTOR.shutdown();
-        try {
-            if (!KEY_RETRIEVAL_EXECUTOR.awaitTermination(2, TimeUnit.SECONDS)) {
+    public void shutdownExecutor() {
+        if (KEY_RETRIEVAL_EXECUTOR != null && !KEY_RETRIEVAL_EXECUTOR.isShutdown()) {
+            LOGGER.info("Shutting down NgrokKeyManager KEY_RETRIEVAL_EXECUTOR for instance {}...", System.identityHashCode(this));
+            KEY_RETRIEVAL_EXECUTOR.shutdown();
+            try {
+                if (!KEY_RETRIEVAL_EXECUTOR.awaitTermination(2, TimeUnit.SECONDS)) {
+                    KEY_RETRIEVAL_EXECUTOR.shutdownNow();
+                    LOGGER.warn("NgrokKeyManager KEY_RETRIEVAL_EXECUTOR for instance {} did not terminate in time.", System.identityHashCode(this));
+                } else {
+                    LOGGER.info("NgrokKeyManager KEY_RETRIEVAL_EXECUTOR for instance {} shut down successfully.", System.identityHashCode(this));
+                }
+            } catch (InterruptedException e) {
                 KEY_RETRIEVAL_EXECUTOR.shutdownNow();
-                LOGGER.warn("NgrokKeyManager KEY_RETRIEVAL_EXECUTOR did not terminate in time.");
-            } else {
-                LOGGER.info("NgrokKeyManager KEY_RETRIEVAL_EXECUTOR shut down successfully.");
+                Thread.currentThread().interrupt();
+                LOGGER.warn("Interrupted while waiting for NgrokKeyManager KEY_RETRIEVAL_EXECUTOR for instance {} to terminate.", System.identityHashCode(this));
             }
-        } catch (InterruptedException e) {
-            KEY_RETRIEVAL_EXECUTOR.shutdownNow();
-            Thread.currentThread().interrupt();
-            LOGGER.warn("Interrupted while waiting for NgrokKeyManager KEY_RETRIEVAL_EXECUTOR to terminate.");
+        } else {
+            LOGGER.info("NgrokKeyManager KEY_RETRIEVAL_EXECUTOR for instance {} is null or already shut down.", System.identityHashCode(this));
         }
     }
 } 

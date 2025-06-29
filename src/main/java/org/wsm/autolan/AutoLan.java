@@ -464,10 +464,9 @@ public class AutoLan implements ModInitializer {
             // Вызываем onServerStopping с null, так как сервер может быть уже недоступен.
             // onServerStopping должен быть готов к этому.
             onServerStopping(null);
-            // Дополнительно убеждаемся, что статические менеджеры executor'ов выключены.
-            // Эти вызовы должны быть идемпотентны.
-            AutoLanAgent.shutdownAgentExecutor(); // Статический метод для остановки AGENT_EXECUTOR
-            NgrokKeyManager.shutdown(); // Статический метод для остановки KEY_RETRIEVAL_EXECUTOR
+            // Статические вызовы shutdown для executor'ов удалены,
+            // так как executor'ы теперь не статические и их остановка управляется экземплярами.
+            // AGENT.shutdown() (вызываемый из onServerStopping) позаботится об этом.
             LOGGER.info("[AutoLan] JVM Shutdown Hook completed.");
         }));
 
@@ -544,10 +543,12 @@ public class AutoLan implements ModInitializer {
         // stopTunnels now takes server argument
         stopTunnels(server);
 
-        // Shutdown static executors. These calls should be safe even if already shutdown.
-        LOGGER.info("[AutoLan] Shutting down static executors for AutoLanAgent and NgrokKeyManager.");
-        AutoLanAgent.shutdownAgentExecutor(); // Ensure this static method exists in AutoLanAgent
-        NgrokKeyManager.shutdown();           // Ensure this static method exists in NgrokKeyManager
+        // Статические вызовы shutdown для executor'ов удалены.
+        // AGENT.shutdown() теперь управляет остановкой executor'ов своего экземпляра
+        // и экземпляра связанного NgrokKeyManager.
+        // LOGGER.info("[AutoLan] Shutting down static executors for AutoLanAgent and NgrokKeyManager.");
+        // AutoLanAgent.shutdownAgentExecutor();
+        // NgrokKeyManager.shutdown();
         
         activeTunnels.clear(); // Очищаем список активных туннелей в любом случае
         LOGGER.info("[AutoLan] Active tunnels map cleared.");

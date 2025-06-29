@@ -29,12 +29,8 @@ import java.util.Map;
 public class AutoLanAgent {
     public static final Logger LOGGER = LoggerFactory.getLogger("AutoLanAgent");
 
-    // Dedicated executor for agent's own async tasks (not key retrieval)
-    private static final ExecutorService AGENT_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-        Thread thread = new Thread(r, "AutoLanAgent-Worker");
-        thread.setDaemon(true);
-        return thread;
-    });
+    // AGENT_EXECUTOR is now a non-static final field
+    private final ExecutorService AGENT_EXECUTOR;
     
     private final ApiClient apiClient;
     private ScheduledExecutorService heartbeatScheduler; // Renamed for clarity
@@ -52,6 +48,11 @@ public class AutoLanAgent {
         this.apiClient = new ApiClient(AutoLan.SERVER_URL, AutoLan.API_KEY);
         this.ngrokStateManager = new NgrokStateManager();
         this.clientIdManager = new PersistentClientIdManager();
+        this.AGENT_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+            Thread thread = new Thread(r, "AutoLanAgent-Worker-" + System.identityHashCode(this));
+            thread.setDaemon(true);
+            return thread;
+        });
         
         // Event handlers for worldActive are removed from here.
         // worldActive will be managed by AutoLan class via setWorldActive().
@@ -134,19 +135,31 @@ public class AutoLanAgent {
         LOGGER.info("Auto-LAN Agent public shutdown called.");
         shutdownInternal(true); // Default to releasing key on public shutdown
 
+        // Shutdown the ngrokKeyManager's executor first, if it exists
+        if (ngrokKeyManager != null) {
+            LOGGER.info("Requesting shutdown of NgrokKeyManager's executor from AutoLanAgent.");
+            ngrokKeyManager.shutdownExecutor(); // Call the new non-static method
+            ngrokKeyManager = null; // Nullify after shutting down its executor
+        }
+
         // Shutdown the agent's own executor
-        AGENT_EXECUTOR.shutdown();
-        try {
-            if (!AGENT_EXECUTOR.awaitTermination(5, TimeUnit.SECONDS)) {
+        if (AGENT_EXECUTOR != null && !AGENT_EXECUTOR.isShutdown()) {
+            LOGGER.info("Shutting down AutoLanAgent AGENT_EXECUTOR for instance {}...", System.identityHashCode(this));
+            AGENT_EXECUTOR.shutdown();
+            try {
+                if (!AGENT_EXECUTOR.awaitTermination(5, TimeUnit.SECONDS)) {
+                    AGENT_EXECUTOR.shutdownNow();
+                    LOGGER.warn("AutoLanAgent AGENT_EXECUTOR for instance {} did not terminate in time.", System.identityHashCode(this));
+                } else {
+                    LOGGER.info("AutoLanAgent AGENT_EXECUTOR for instance {} shut down successfully.", System.identityHashCode(this));
+                }
+            } catch (InterruptedException e) {
                 AGENT_EXECUTOR.shutdownNow();
-                LOGGER.warn("Agent executor did not terminate in time.");
-            } else {
-                LOGGER.info("Agent executor shut down successfully.");
+                LOGGER.warn("Interrupted while waiting for AutoLanAgent AGENT_EXECUTOR for instance {} to terminate.", System.identityHashCode(this));
+                Thread.currentThread().interrupt();
             }
-        } catch (InterruptedException e) {
-            AGENT_EXECUTOR.shutdownNow();
-            LOGGER.warn("Interrupted while waiting for agent executor to terminate.");
-            Thread.currentThread().interrupt();
+        } else {
+            LOGGER.info("AutoLanAgent AGENT_EXECUTOR for instance {} is null or already shut down.", System.identityHashCode(this));
         }
     }
 
@@ -403,28 +416,6 @@ public class AutoLanAgent {
         LOGGER.info("New tunnel established: {} -> {}", tunnelName, tunnelUrl);
     }
 
-    /**
-     * Shuts down the agent's dedicated executor service.
-     * This should be called globally when the mod is shutting down.
-     */
-    public static void shutdownAgentExecutor() {
-        if (AGENT_EXECUTOR != null && !AGENT_EXECUTOR.isShutdown()) {
-            LOGGER.info("Shutting down AutoLanAgent AGENT_EXECUTOR...");
-            AGENT_EXECUTOR.shutdown();
-            try {
-                if (!AGENT_EXECUTOR.awaitTermination(5, TimeUnit.SECONDS)) {
-                    AGENT_EXECUTOR.shutdownNow();
-                    LOGGER.warn("AutoLanAgent AGENT_EXECUTOR did not terminate in time.");
-                } else {
-                    LOGGER.info("AutoLanAgent AGENT_EXECUTOR shut down successfully.");
-                }
-            } catch (InterruptedException e) {
-                AGENT_EXECUTOR.shutdownNow();
-                LOGGER.warn("Interrupted while waiting for AutoLanAgent AGENT_EXECUTOR to terminate.");
-                Thread.currentThread().interrupt();
-            }
-        } else {
-            LOGGER.info("AutoLanAgent AGENT_EXECUTOR is null or already shut down.");
-        }
-    }
+    // Removed static shutdownAgentExecutor() method.
+    // Instance-specific AGENT_EXECUTOR is shut down in the instance's shutdown() method.
 } 
